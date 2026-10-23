@@ -8,18 +8,21 @@ Ao fechar (virada da hora ou fim da sessão), o arquivo recebe fsync e é renome
 
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import BinaryIO
 
 from trader.core.rawformat import RawRecord, encode
+from trader.storage.layout import (
+    HOUR_US,
+    OPEN_SUFFIX,
+    StorageError,
+    channel_dir,
+    fsync_dir,
+    hour_dirs,
+    raw_root,
+)
 
-HOUR_US = 3_600_000_000
-OPEN_SUFFIX = ".open"
-
-
-class StorageError(Exception):
-    """Falha de disco ao gravar a camada bruta. É fatal: o coletor deve parar (RNF-004)."""
+__all__ = ["HOUR_US", "RawWriter", "StorageError"]
 
 
 @dataclass(slots=True)
@@ -29,14 +32,9 @@ class _OpenFile:
     hour: int
 
 
-def channel_dir(channel: str) -> str:
-    """`rest:depth` → `rest_depth`; o nome original continua no envelope."""
-    return channel.replace(":", "_")
-
-
 class RawWriter:
     def __init__(self, data_dir: Path, symbol: str) -> None:
-        self._root = data_dir / "raw" / "binance-spot" / symbol.lower()
+        self._root = raw_root(data_dir, symbol)
         self._files: dict[tuple[str, str], _OpenFile] = {}
         # A hora de cada arquivo nunca retrocede, mesmo que o relógio volte (evita reabrir
         # e sobrescrever um arquivo já fechado).
@@ -86,10 +84,9 @@ class RawWriter:
 
     def _open(self, key: tuple[str, str], hour: int) -> _OpenFile:
         channel, session = key
-        start = datetime.fromtimestamp(hour * HOUR_US / 1e6, UTC)
-        directory = (
-            self._root / channel_dir(channel) / f"date={start:%Y-%m-%d}" / f"hour={start:%H}"
-        )
+        directory = self._root / channel_dir(channel)
+        for part in hour_dirs(hour):
+            directory /= part
         path = directory / f"{session}.jsonl{OPEN_SUFFIX}"
         try:
             directory.mkdir(parents=True, exist_ok=True)
@@ -109,14 +106,6 @@ class RawWriter:
             os.fsync(open_file.handle.fileno())
             open_file.handle.close()
             os.rename(open_file.path, final)
-            _fsync_dir(final.parent)
+            fsync_dir(final.parent)
         except OSError as exc:
             raise StorageError(f"falha ao fechar {open_file.path}: {exc}") from exc
-
-
-def _fsync_dir(directory: Path) -> None:
-    fd = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)

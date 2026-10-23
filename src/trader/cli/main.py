@@ -1,4 +1,4 @@
-"""Linha de comando: `trader collect` e `trader status` (RF-181-RF-185)."""
+"""Linha de comando: `trader collect`, `trader status` e `trader pipeline` (RF-181 a RF-185)."""
 
 import argparse
 import asyncio
@@ -14,13 +14,22 @@ import httpx
 from trader.ingest.collector import Collector
 from trader.ingest.raw_writer import RawWriter
 from trader.ops.clock import SystemClock
-from trader.ops.config import CollectorConfig, ConfigError, load_config
+from trader.ops.config import (
+    CollectorConfig,
+    ConfigError,
+    PipelineConfig,
+    load_config,
+    load_pipeline_config,
+)
 from trader.ops.health import health_path, read_health
 from trader.ops.logs import configure_logging
 from trader.ops.metrics import Metrics, NullMetrics, StatsdMetrics
 from trader.ops.state import StateStore
+from trader.pipeline.hourly import HourlyPipeline, PipelineBusy
 from trader.sources.binance_rest import BinanceRest, WeightLimiter
 from trader.sources.binance_ws import websockets_connector
+from trader.storage.layout import HOUR_US
+from trader.storage.objectstore import LocalDirectoryStore
 
 STALE_HEALTH_S = 30
 
@@ -39,12 +48,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     status.add_argument("--config", type=Path)
     status.add_argument("--data-dir", type=Path)
 
+    pipeline = commands.add_parser("pipeline", help="executa uma rodada do pipeline horário")
+    pipeline.add_argument("--config", type=Path, help="arquivo TOML com a tabela [pipeline]")
+    pipeline.add_argument("--data-dir", type=Path)
+    pipeline.add_argument("--replica-dir", type=Path, help="réplica local (desenvolvimento)")
+    pipeline.add_argument(
+        "--rebuild", action="store_true", help="normaliza de novo todas as horas (RF-133)"
+    )
+    pipeline.add_argument("--log-level", default="INFO")
+
     args = parser.parse_args(argv)
     try:
-        config = load_config(args.config, data_dir=args.data_dir)
+        if args.command == "pipeline":
+            pipeline_config = load_pipeline_config(
+                args.config, data_dir=args.data_dir, replica_dir=args.replica_dir
+            )
+        else:
+            config = load_config(args.config, data_dir=args.data_dir)
     except ConfigError as exc:
         print(f"configuração inválida: {exc}", file=sys.stderr)
         return 2
+    if args.command == "pipeline":
+        configure_logging(args.log_level)
+        return run_pipeline(pipeline_config, rebuild=args.rebuild)
     if args.command == "collect":
         configure_logging(args.log_level)
         asyncio.run(run_collector(config, args.duration))
@@ -133,3 +159,30 @@ def show_status(config: CollectorConfig) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def run_pipeline(config: PipelineConfig, *, rebuild: bool = False) -> int:
+    store = LocalDirectoryStore(config.replica_dir) if config.replica_dir else None
+    with StateStore(config.data_dir / "state.db") as state:
+        try:
+            report = HourlyPipeline(config, state, store).run(
+                time.time_ns() // 1000, rebuild=rebuild
+            )
+        except PipelineBusy as exc:
+            print(str(exc), file=sys.stderr)
+            return 3
+    hours = ", ".join(_hour_label(h) for h in report.normalized_hours) or "nenhuma"
+    print(f"órfãos fechados: {report.sealed_orphans} · comprimidos: {report.compressed}")
+    print(f"horas normalizadas: {hours}")
+    if report.normalized_hours:
+        rows = " · ".join(f"{k}: {v}" for k, v in sorted(report.rows.items()))
+        duplicates = sum(report.duplicates.values())
+        print(f"linhas: {rows} · duplicatas descartadas: {duplicates}")
+        print(f"quarentena: {report.quarantined}")
+    replica = "desligada" if store is None else f"{report.replicated} arquivo(s)"
+    print(f"réplica: {replica} · removidos pela retenção: {report.deleted}")
+    return 0
+
+
+def _hour_label(hour: int) -> str:
+    return time.strftime("%Y-%m-%d %H:00 UTC", time.gmtime(hour * HOUR_US / 1e6))

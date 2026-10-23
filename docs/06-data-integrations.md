@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | Sistema de trading algorítmico com IA — *nome a definir (PD-01)* |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.3 — rascunho |
+| Versão | 0.4 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -180,7 +180,7 @@ Uma única conexão de streams combinados (`/stream?streams=...&timeUnit=MICROSE
 | **Bruta** | Mensagens exatamente como recebidas, de WebSocket e REST. | JSONL; comprimido com zstd ao fechar | Imutável (RN-007) |
 | **Normalizada** | Registros com esquema canônico, deduplicados e validados. | Parquet com compressão zstd | Regenerável a partir da bruta (RF-133) |
 | **Derivada** | Máscara de qualidade, relatórios, agregações (F-11). | Parquet | Regenerável |
-| **Quarentena** | Mensagens que falharam no parsing ou na validação. | JSONL zstd | Imutável |
+| **Quarentena** | Mensagens que falharam no parsing ou na validação; uma linha por registro, com canal e motivo. Caminho: `quarantine/binance-spot/<ativo>/date=…/hour=…/normalize.jsonl.zst`. | JSONL zstd | Regenerada junto com a hora |
 
 A camada normalizada é sempre produzida **a partir dos arquivos brutos fechados**, por um processamento horário que usa o mesmo código de normalização do caminho ao vivo. Isso garante o determinismo (RF-128) e que o ao vivo e o histórico passem pelas mesmas regras (PP-05).
 
@@ -279,7 +279,9 @@ Somente candles fechados (RF-102).
 | `bid_px`, `bid_qty` | LIST<DECIMAL(18,8)> (20 itens) | `bids`, do melhor para o pior |
 | `ask_px`, `ask_qty` | LIST<DECIMAL(18,8)> (20 itens) | `asks`, do melhor para o pior |
 
-Repetição do mesmo `last_update_id` mantém a primeira ocorrência (SRS §3). As listas podem ser expandidas em colunas (`bid_px_1` … `bid_px_20`) por uma visão de leitura, sem duplicar dados.
+Repetição do mesmo `last_update_id` mantém a primeira ocorrência (SRS §3). As listas podem ser expandidas em colunas (`bid_px_1` … `bid_px_20`) por uma visão de leitura, sem duplicar dados. A coluna `origin` é sempre `live`.
+
+**Partição e ordem.** Negócios ficam na hora do `trade_ts_us`; candles, na hora de `open_ts_us`; snapshots do livro, na hora do primeiro recebimento. As linhas ficam em ordem de recebimento; quem lê ordena pela chave quando precisar. A máscara de qualidade fica em `derived/quality_mask/symbol=…/date=…/HH.parquet` (colunas: `symbol`, `channel`, `minute_ts_us`, `status`, `details`, `schema_version`).
 
 #### Datasets operacionais
 
@@ -355,7 +357,7 @@ Regras: checksum verificado antes da importação (RF-143); unidade de tempo con
 | Marca de tempo fora da faixa da unidade declarada | Todos | Rejeitar para quarentena. |
 | Preço ou quantidade ≤ 0 | Negócios, livro | Rejeitar para quarentena. |
 | Id de negócio repetido com conteúdo idêntico | Negócios | Descartar a repetição (sobreposição na rotação ou recuperação). |
-| Id de negócio repetido com conteúdo diferente | Negócios | Quarentena das duas versões e alerta. |
+| Chave repetida com conteúdo diferente | Negócios, candles, top 20 | Fica a primeira cópia recebida; a divergente vai para a quarentena e o minuto é marcado `invalid` (a pesquisa exclui o minuto inteiro). |
 | Salto na sequência de ids | Negócios | Registrar lacuna e recuperar (§9). |
 | `recv_ts_us − trade_ts_us − offset` acima de 5 s [PROPOSTA] | Negócios ao vivo | Aceitar e marcar `late` na máscara. |
 | OHLC inconsistente ou volume negativo | Candles | Rejeitar e alertar. |
@@ -476,3 +478,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.1 | 23/10/2026 | Rascunho inicial com DEC-18, DEC-19 e DEC-20; medições de referência a partir do MacBook. |
 | 0.2 | 23/10/2026 | Custo de S3 com o preço de Tóquio (DEC-21); pendência de preços movida para o CP-3. |
 | 0.3 | 23/10/2026 | Pendências atualizadas com a primeira coleta local (frequência do top 20; precisão da sonda de relógio). |
+| 0.4 | 23/10/2026 | Regras do pipeline implementado: partição e ordem dos datasets, quarentena por hora, cópia divergente (fica a primeira; minuto `invalid`). |

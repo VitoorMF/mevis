@@ -45,7 +45,67 @@ CREATE TABLE IF NOT EXISTS watermarks (
     last_id   INTEGER,
     last_ts_us INTEGER
 );
+CREATE TABLE IF NOT EXISTS raw_files (
+    rel_path          TEXT PRIMARY KEY,
+    channel_dir       TEXT NOT NULL,
+    session_id        TEXT NOT NULL,
+    hour              INTEGER NOT NULL,
+    sha256            TEXT NOT NULL,
+    file_sha256       TEXT NOT NULL,
+    original_size     INTEGER NOT NULL,
+    compressed_size   INTEGER NOT NULL,
+    compressed_ts_us  INTEGER NOT NULL,
+    replicated_ts_us  INTEGER,
+    deleted_ts_us     INTEGER
+);
+CREATE INDEX IF NOT EXISTS raw_files_by_hour ON raw_files (hour);
+CREATE TABLE IF NOT EXISTS outputs (
+    rel_path          TEXT PRIMARY KEY,
+    hour              INTEGER,
+    file_sha256       TEXT NOT NULL,
+    written_ts_us     INTEGER NOT NULL,
+    replicated_ts_us  INTEGER,
+    deleted_ts_us     INTEGER
+);
+CREATE TABLE IF NOT EXISTS normalized_hours (
+    symbol            TEXT NOT NULL,
+    hour              INTEGER NOT NULL,
+    inputs_digest     TEXT NOT NULL,
+    normalized_ts_us  INTEGER NOT NULL,
+    PRIMARY KEY (symbol, hour)
+);
 """
+
+
+@dataclass(frozen=True, slots=True)
+class RawFileRow:
+    """Arquivo bruto comprimido, registrado pelo pipeline (doc 03 §6.3)."""
+
+    rel_path: str
+    channel_dir: str
+    session_id: str
+    hour: int
+    sha256: str
+    """Conteúdo original (descomprimido)."""
+    file_sha256: str
+    """Bytes do `.zst`, para conferir a réplica."""
+    original_size: int
+    compressed_size: int
+    compressed_ts_us: int
+    replicated_ts_us: int | None = None
+    deleted_ts_us: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OutputRow:
+    """Arquivo produzido pelo pipeline (Parquet, quarentena, exportações)."""
+
+    rel_path: str
+    hour: int | None
+    file_sha256: str
+    written_ts_us: int
+    replicated_ts_us: int | None = None
+    deleted_ts_us: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,29 +208,7 @@ class StateStore:
         return int(cursor.lastrowid or 0)
 
     def gaps_since(self, detected_from_us: int) -> list[StoredGap]:
-        rows = self._db.execute(
-            "SELECT gap_id, channel, start_ts_us, end_ts_us, cause, detected_ts_us, recoverable,"
-            " first_missing_id, last_missing_id, status FROM gaps"
-            " WHERE detected_ts_us >= ? ORDER BY gap_id",
-            (detected_from_us,),
-        )
-        return [
-            StoredGap(
-                gap_id=row[0],
-                record=GapRecord(
-                    channel=row[1],
-                    start_ts_us=row[2],
-                    end_ts_us=row[3],
-                    cause=row[4],
-                    detected_ts_us=row[5],
-                    recoverable=bool(row[6]),
-                    first_missing_id=row[7],
-                    last_missing_id=row[8],
-                ),
-                status=row[9],
-            )
-            for row in rows
-        ]
+        return self._gaps("detected_ts_us >= ?", (detected_from_us,))
 
     def record_clock_offset(
         self, local_ts_us: int, server_ts_us: int, rtt_us: int, offset_us: int
@@ -191,3 +229,158 @@ class StateStore:
     def load_watermarks(self) -> dict[str, tuple[int | None, int | None]]:
         rows = self._db.execute("SELECT name, last_id, last_ts_us FROM watermarks")
         return {name: (last_id, last_ts) for name, last_id, last_ts in rows}
+
+    # ------------------------------------------------------------------ pipeline
+
+    def closed_sessions(self) -> set[str]:
+        rows = self._db.execute("SELECT session_id FROM sessions WHERE closed_ts_us IS NOT NULL")
+        return {row[0] for row in rows}
+
+    def gaps_overlapping(self, start_ts_us: int, end_ts_us: int) -> list[StoredGap]:
+        """Lacunas cujo intervalo cruza `[start_ts_us, end_ts_us)`."""
+        return self._gaps("start_ts_us < ? AND end_ts_us > ?", (end_ts_us, start_ts_us))
+
+    def clock_offsets_between(self, start_ts_us: int, end_ts_us: int) -> list[tuple[int, int]]:
+        rows = self._db.execute(
+            "SELECT local_ts_us, offset_us FROM clock_offsets"
+            " WHERE local_ts_us >= ? AND local_ts_us < ? ORDER BY local_ts_us",
+            (start_ts_us, end_ts_us),
+        )
+        return [(row[0], row[1]) for row in rows]
+
+    def register_raw_file(self, row: RawFileRow) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO raw_files VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                row.rel_path,
+                row.channel_dir,
+                row.session_id,
+                row.hour,
+                row.sha256,
+                row.file_sha256,
+                row.original_size,
+                row.compressed_size,
+                row.compressed_ts_us,
+                row.replicated_ts_us,
+                row.deleted_ts_us,
+            ),
+        )
+
+    def raw_files(self, where: str = "1", params: Sequence[object] = ()) -> list[RawFileRow]:
+        rows = self._db.execute(
+            f"SELECT * FROM raw_files WHERE {where} ORDER BY rel_path",
+            tuple(params),
+        )
+        return [RawFileRow(*row) for row in rows]
+
+    def raw_file(self, rel_path: str) -> RawFileRow | None:
+        found = self.raw_files("rel_path = ?", (rel_path,))
+        return found[0] if found else None
+
+    def mark_raw(
+        self,
+        rel_path: str,
+        *,
+        replicated_ts_us: int | None = None,
+        deleted_ts_us: int | None = None,
+    ) -> None:
+        if replicated_ts_us is not None:
+            self._db.execute(
+                "UPDATE raw_files SET replicated_ts_us = ? WHERE rel_path = ?",
+                (replicated_ts_us, rel_path),
+            )
+        if deleted_ts_us is not None:
+            self._db.execute(
+                "UPDATE raw_files SET deleted_ts_us = ? WHERE rel_path = ?",
+                (deleted_ts_us, rel_path),
+            )
+
+    def register_output(
+        self, rel_path: str, hour: int | None, file_sha256: str, ts_us: int
+    ) -> None:
+        """Registra um arquivo produzido. Conteúdo novo precisa ser replicado de novo."""
+        current = self.outputs("rel_path = ?", (rel_path,))
+        if current and current[0].file_sha256 == file_sha256 and current[0].deleted_ts_us is None:
+            return
+        self._db.execute(
+            "INSERT OR REPLACE INTO outputs VALUES (?, ?, ?, ?, NULL, NULL)",
+            (rel_path, hour, file_sha256, ts_us),
+        )
+
+    def outputs(self, where: str = "1", params: Sequence[object] = ()) -> list[OutputRow]:
+        rows = self._db.execute(
+            f"SELECT * FROM outputs WHERE {where} ORDER BY rel_path",
+            tuple(params),
+        )
+        return [OutputRow(*row) for row in rows]
+
+    def mark_output(
+        self,
+        rel_path: str,
+        *,
+        replicated_ts_us: int | None = None,
+        deleted_ts_us: int | None = None,
+    ) -> None:
+        if replicated_ts_us is not None:
+            self._db.execute(
+                "UPDATE outputs SET replicated_ts_us = ? WHERE rel_path = ?",
+                (replicated_ts_us, rel_path),
+            )
+        if deleted_ts_us is not None:
+            self._db.execute(
+                "UPDATE outputs SET deleted_ts_us = ? WHERE rel_path = ?",
+                (deleted_ts_us, rel_path),
+            )
+
+    def normalized_digest(self, symbol: str, hour: int) -> str | None:
+        row = self._db.execute(
+            "SELECT inputs_digest FROM normalized_hours WHERE symbol = ? AND hour = ?",
+            (symbol, hour),
+        ).fetchone()
+        return None if row is None else str(row[0])
+
+    def set_normalized(self, symbol: str, hour: int, digest: str, ts_us: int) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO normalized_hours VALUES (?, ?, ?, ?)",
+            (symbol, hour, digest, ts_us),
+        )
+
+    def table_rows(self, table: str) -> tuple[list[str], list[tuple[object, ...]]]:
+        """Colunas e linhas de uma tabela operacional, para exportação (doc 06 §5.4)."""
+        if table not in {"sessions", "gaps", "clock_offsets"}:
+            raise ValueError(f"tabela não exportável: {table}")
+        cursor = self._db.execute(f"SELECT * FROM {table}")
+        return [d[0] for d in cursor.description], cursor.fetchall()
+
+    def backup_to(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        target = sqlite3.connect(path)
+        try:
+            self._db.backup(target)
+        finally:
+            target.close()
+
+    def _gaps(self, where: str, params: Sequence[object]) -> list[StoredGap]:
+        rows = self._db.execute(
+            "SELECT gap_id, channel, start_ts_us, end_ts_us, cause, detected_ts_us, recoverable,"
+            f" first_missing_id, last_missing_id, status FROM gaps WHERE {where}"
+            " ORDER BY gap_id",
+            tuple(params),
+        )
+        return [
+            StoredGap(
+                gap_id=row[0],
+                record=GapRecord(
+                    channel=row[1],
+                    start_ts_us=row[2],
+                    end_ts_us=row[3],
+                    cause=row[4],
+                    detected_ts_us=row[5],
+                    recoverable=bool(row[6]),
+                    first_missing_id=row[7],
+                    last_missing_id=row[8],
+                ),
+                status=row[9],
+            )
+            for row in rows
+        ]

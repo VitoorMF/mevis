@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | Sistema de trading algorítmico com IA — *nome a definir (PD-01)* |
 | Documento | 03 — System Architecture |
-| Versão | 0.3 — rascunho |
+| Versão | 0.4 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-21 a DEC-24 tomadas; ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -154,6 +154,8 @@ trader/
   ingest/      sessão e rotação, gravador bruto, verificações ao vivo, snapshots, offset
   storage/     layout de caminhos, escrita de Parquet, sincronização S3, retenção
   recovery/    estratégias de recuperação por canal
+  pipeline/    rodada horária: órfãos, compressão, normalização por hora, máscara, exportações,
+               réplica e retenção
   ops/         configuração, logs estruturados, StatsD, saúde, estado SQLite
   cli/         comandos
 ```
@@ -193,16 +195,20 @@ Se a nova sessão falhar ou não ficar pronta em 60 s, a rotação é adiada em 
 ### 6.3 Pipeline horário (ADR-04)
 
 ```text
-HH:05 ─► para cada arquivo fechado ainda não processado:
-           comprimir (zstd) ─► verificar ─► enviar ao S3 ─► marcar replicado no state.db
-         para cada canal com a hora completa replicada:
-           normalizar ─► deduplicar ─► validar ─► Parquet ─► enviar ao S3
-         atualizar máscara de qualidade e datasets operacionais ─► aplicar retenção local
+HH:05 ─► fechar órfãos ─► comprimir e verificar arquivos fechados ─► registrar no state.db
+         para cada hora cujas entradas mudaram:
+           normalizar ─► deduplicar ─► validar ─► Parquet + quarentena ─► máscara de qualidade
+         exportar datasets operacionais e cópia do state.db
+         replicar o que falta ─► aplicar retenção local
 ```
 
+- **Órfãos:** um arquivo `.open` é fechado pelo pipeline se a sessão consta como encerrada ou se a hora dele terminou há mais de 5 minutos (o coletor vivo fecha arquivos na virada da hora).
+- **Quando uma hora é normalizada:** quando nenhum arquivo bruto dela está aberto. Lê a hora H e 5 minutos de margem das horas vizinhas, em ordem global de recebimento entre sessões, e particiona pelo horário do evento (negócios, candles) ou do primeiro recebimento (livro).
+- **Renormalização automática:** um resumo das entradas (arquivos brutos de H-1 a H+1, lacunas e offsets de relógio próximos) fica no `state.db`. Se mudar — arquivo vizinho que fechou depois, lacuna detectada mais tarde, recuperação —, a hora é refeita. `trader pipeline --rebuild` refaz todas (RF-133), desde que as entradas ainda estejam no disco local.
 - **Idempotente:** cada etapa consulta o `state.db`; reexecutar não duplica nada.
 - **Exclusivo:** um `flock` impede duas execuções simultâneas.
-- **Memória limitada:** processa um arquivo por vez, em blocos.
+- **Memória limitada:** em fluxo; só as chaves já vistas ficam em memória, e o Parquet é gravado em blocos. Uma hora real de teste usou ~125 MB.
+- **Réplica:** interface de armazenamento com implementação em diretório local (desenvolvimento); a implementação no S3 entra com a infraestrutura AWS.
 - **Portável:** lê arquivos brutos (locais ou do S3) e escreve no S3. Pode rodar no MacBook ou em Lambda, caso a instância seja reduzida (DEC-23).
 
 ### 6.4 Recuperação de lacunas
@@ -475,3 +481,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.1 | 23/10/2026 | Rascunho inicial: Data Engine e hospedagem AWS; DEC-21 a DEC-23; ADR-01 a ADR-12 propostas. |
 | 0.2 | 23/10/2026 | ADR-01 a ADR-12 aprovadas (DEC-24); teto pós-créditos de R$ 100/mês; DEC-23 e CP-3 reescritos. |
 | 0.3 | 23/10/2026 | §6.2 detalha o buffer e a sobreposição da rotação; §4.2 inclui as marcas d'água no `state.db` (ambos implementados no coletor). |
+| 0.4 | 23/10/2026 | §5 inclui o módulo `pipeline`; §6.3 descreve órfãos, elegibilidade, renormalização por resumo das entradas, memória e réplica, como implementados. |

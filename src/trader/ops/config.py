@@ -82,20 +82,77 @@ class CollectorConfig:
         return self
 
 
-def load_config(path: Path | None = None, **overrides: Any) -> CollectorConfig:
-    """Lê a tabela `[collector]` de um TOML (opcional) e aplica `overrides` não nulos."""
-    values: dict[str, Any] = {}
-    if path is not None:
-        try:
-            document = tomllib.loads(path.read_text())
-        except (OSError, tomllib.TOMLDecodeError) as exc:
-            raise ConfigError(f"não foi possível ler {path}: {exc}") from exc
-        values.update(document.get("collector", {}))
-    values.update({k: v for k, v in overrides.items() if v is not None})
-    known = {f.name for f in fields(CollectorConfig)}
-    unknown = set(values) - known
+@dataclass(frozen=True)
+class PipelineConfig:
+    """Pipeline horário (doc 03 §6.3). `symbol` e `data_dir` vêm de `[collector]` se omitidos."""
+
+    symbol: str = "BTCUSDT"
+    data_dir: Path = Path("data")
+    compression_level: int = 9
+    orphan_grace_s: float = 300.0
+    boundary_margin_s: float = 300.0
+    late_limit_s: float = 5.0
+    clock_offset_alert_ms: float = 250.0
+    clock_reference_window_s: float = 600.0
+    local_retention_days: float = 7.0
+    replica_dir: Path | None = None
+    trades_row_group: int = 50_000
+    books_row_group: int = 2_000
+
+    @property
+    def streams(self) -> tuple[str, ...]:
+        prefix = self.symbol.lower()
+        return tuple(f"{prefix}@{suffix}" for suffix in STREAM_SUFFIXES)
+
+    def validate(self) -> "PipelineConfig":
+        if not self.symbol.isalnum() or not self.symbol.isupper():
+            raise ConfigError(f"symbol deve ser alfanumérico em maiúsculas: {self.symbol!r}")
+        if not 1 <= self.compression_level <= 22:
+            raise ConfigError("compression_level deve estar entre 1 e 22")
+        for f in fields(self):
+            value = getattr(self, f.name)
+            if f.name.endswith(("_s", "_ms", "_days", "_row_group")) and value <= 0:
+                raise ConfigError(f"{f.name} deve ser positivo")
+        return self
+
+
+def _read_tables(path: Path | None) -> dict[str, dict[str, Any]]:
+    if path is None:
+        return {}
+    try:
+        return tomllib.loads(path.read_text())
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ConfigError(f"não foi possível ler {path}: {exc}") from exc
+
+
+def _check_keys(cls: type, values: Mapping[str, Any]) -> None:
+    unknown = set(values) - {f.name for f in fields(cls)}
     if unknown:
         raise ConfigError(f"chaves desconhecidas: {sorted(unknown)}")
+
+
+def load_pipeline_config(path: Path | None = None, **overrides: Any) -> PipelineConfig:
+    tables = _read_tables(path)
+    collector = tables.get("collector", {})
+    values: dict[str, Any] = {k: collector[k] for k in ("symbol", "data_dir") if k in collector}
+    values.update(tables.get("pipeline", {}))
+    values.update({k: v for k, v in overrides.items() if v is not None})
+    _check_keys(PipelineConfig, values)
+    for key in ("data_dir", "replica_dir"):
+        if values.get(key) is not None:
+            values[key] = Path(values[key])
+    try:
+        config = replace(PipelineConfig(), **values)
+    except TypeError as exc:
+        raise ConfigError(str(exc)) from exc
+    return config.validate()
+
+
+def load_config(path: Path | None = None, **overrides: Any) -> CollectorConfig:
+    """Lê a tabela `[collector]` de um TOML (opcional) e aplica `overrides` não nulos."""
+    values: dict[str, Any] = dict(_read_tables(path).get("collector", {}))
+    values.update({k: v for k, v in overrides.items() if v is not None})
+    _check_keys(CollectorConfig, values)
     if "data_dir" in values:
         values["data_dir"] = Path(values["data_dir"])
     if "ws_base_urls" in values:
