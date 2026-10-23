@@ -273,3 +273,12 @@ def test_concurrent_runs_are_rejected(scenario: tuple[PipelineConfig, Path]) -> 
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         with pytest.raises(PipelineBusy):
             run(config, replica, END + 2 * HOUR_US)
+
+
+def test_replication_lag_metric(scenario: tuple[PipelineConfig, Path]) -> None:
+    config, replica = scenario
+    report = run(config, replica, END + 2 * HOUR_US)
+    assert report.replication_lag_minutes == 0.0
+    with StateStore(config.data_dir / "state.db") as state:
+        without_replica = HourlyPipeline(config, state, None).run(END + 2 * HOUR_US)
+    assert without_replica.replication_lag_minutes is None

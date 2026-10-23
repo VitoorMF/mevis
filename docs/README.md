@@ -1,16 +1,16 @@
-# Documentação do projeto
+# Documentação do MERIS
 
 Fase atual: **V0.1 (Data Engine) em implementação**, coberta pelos docs 02, 03 e 06. Os docs 04, 05, 07 e 08 vêm em paralelo. Nenhum código deve ser escrito antes de o documento correspondente estar aprovado.
 
 | # | Documento | Status |
 |---|---|---|
 | 00 | [Contexto inicial](00-contexto-inicial.md) (transferência entre agentes) | Referência histórica, não normativa |
-| 01 | [Product Requirements Document (PRD)](01-prd.md) | Rascunho v0.6 |
-| 02 | [Software Requirements Specification (SRS)](02-srs.md) | Rascunho v0.4 — V0.1 detalhada; V0.2 e V0.3 delimitadas |
-| 03 | [System Architecture Document](03-architecture.md) | Rascunho v0.4 — Data Engine e AWS; ADRs aprovadas |
+| 01 | [Product Requirements Document (PRD)](01-prd.md) | Rascunho v0.8 |
+| 02 | [Software Requirements Specification (SRS)](02-srs.md) | Rascunho v0.5 — V0.1 detalhada; V0.2 e V0.3 delimitadas |
+| 03 | [System Architecture Document](03-architecture.md) | Rascunho v0.6 — Data Engine e AWS (us-east-2); ADRs aprovadas; Terraform em `infra/` |
 | 04 | AI & Quantitative Research Specification | Não iniciado |
 | 05 | Trading & Risk Engine Specification | Não iniciado |
-| 06 | [Data & Integrations Specification](06-data-integrations.md) | Rascunho v0.4 — dados de mercado da V0.1 |
+| 06 | [Data & Integrations Specification](06-data-integrations.md) | Rascunho v0.5 — dados de mercado da V0.1 |
 | 07 | Testing & Validation Plan | Não iniciado |
 | 08 | Roadmap & Milestones | Não iniciado |
 

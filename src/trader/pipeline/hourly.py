@@ -64,6 +64,8 @@ class PipelineReport:
     quarantined: int = 0
     replicated: int = 0
     deleted: int = 0
+    replication_lag_minutes: float | None = None
+    """Idade do item mais antigo ainda não replicado (0 se nada pendente; None sem réplica)."""
 
 
 class HourlyPipeline:
@@ -84,6 +86,7 @@ class HourlyPipeline:
             self._export_ops(now_us)
             self._replicate(now_us, report)
             self._apply_retention(now_us, report)
+            report.replication_lag_minutes = self._replication_lag_minutes(now_us)
         log.info(
             "pipeline concluído",
             extra=ctx(
@@ -247,6 +250,15 @@ class HourlyPipeline:
             (self._data_dir / output.rel_path).unlink(missing_ok=True)
             self._state.mark_output(output.rel_path, deleted_ts_us=now_us)
             report.deleted += 1
+
+    def _replication_lag_minutes(self, now_us: int) -> float | None:
+        """Métrica `ReplicationLagMinutes` (doc 03 §7.5)."""
+        if self._store is None:
+            return None
+        pending = "replicated_ts_us IS NULL AND deleted_ts_us IS NULL"
+        times = [r.compressed_ts_us for r in self._state.raw_files(pending)]
+        times += [o.written_ts_us for o in self._state.outputs(pending)]
+        return max(0.0, (now_us - min(times)) / 60e6) if times else 0.0
 
     # ------------------------------------------------------------------ apoio
 

@@ -60,3 +60,27 @@ def test_invalid_config_file(tmp_path: Path, capsys: pytest.CaptureFixture[str])
     config.write_text("[collector]\nnope = 1\n")
     assert main(["status", "--config", str(config)]) == 2
     assert "configuração inválida" in capsys.readouterr().err
+
+
+def test_status_lists_every_instance(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    now = time.time_ns() // 1000
+    for instance in ("a", "b"):
+        write_health(
+            health_path(tmp_path, instance),
+            {
+                "status": "running",
+                "instance": instance,
+                "version": "0.1.0",
+                "updated_ts_us": now,
+                "primary_session": "S",
+                "primary_endpoint": "wss://x",
+                "channels": {},
+                "gaps_detected": 0,
+                "reconnects": 0,
+                "malformed_messages": 0,
+                "clock_offset_us": None,
+            },
+        )
+    assert main(["status", "--data-dir", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert "coletor [a]" in out and "coletor [b]" in out

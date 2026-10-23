@@ -1,4 +1,8 @@
-"""Arquivo de saúde do coletor (doc 03 §4.2): JSON reescrito atomicamente a cada poucos segundos."""
+"""Arquivo de saúde do coletor (doc 03 §4.2): JSON reescrito atomicamente a cada poucos segundos.
+
+Cada instância do coletor tem o seu (`collector-<instância>.json`), para que duas versões possam
+rodar juntas durante a troca sem lacuna (doc 03 §9.2).
+"""
 
 import json
 import os
@@ -7,8 +11,12 @@ from pathlib import Path
 from typing import Any
 
 
-def health_path(data_dir: Path) -> Path:
-    return data_dir / "health" / "collector.json"
+def health_path(data_dir: Path, instance: str = "main") -> Path:
+    return data_dir / "health" / f"collector-{instance}.json"
+
+
+def health_files(data_dir: Path) -> list[Path]:
+    return sorted((data_dir / "health").glob("collector-*.json"))
 
 
 def write_health(path: Path, payload: Mapping[str, Any]) -> None:

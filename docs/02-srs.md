@@ -2,9 +2,9 @@
 
 | Campo | Valor |
 |---|---|
-| Projeto | Sistema de trading algorítmico com IA — *nome a definir (PD-01)* |
+| Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 02 — SRS |
-| Versão | 0.4 — rascunho |
+| Versão | 0.5 — rascunho |
 | Escopo desta versão | **V0.1 (Data Engine) detalhada.** V0.2 e V0.3 apenas delimitadas (§9), a detalhar depois dos docs 04 e 05. |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -122,7 +122,7 @@ As três classes correspondem à mesma pessoa (PRD §6.1).
 | Ambiente | Uso | Observações |
 |---|---|---|
 | MacBook Air M2, macOS ARM64 | Desenvolvimento, testes, pesquisa, backfill pontual. | RS-01 (256 GB, sem operação 24/7). |
-| Amazon Linux 2023 (ARM64) em AWS EC2, Tóquio | Coleta contínua 24/7. | DEC-17, DEC-21; instância e rede no doc 03 §7. |
+| Amazon Linux 2023 (ARM64) em AWS EC2, Ohio (us-east-2) | Coleta contínua 24/7, só pelos endpoints `*.binance.vision` (doc 06 §2.4). | DEC-17, DEC-26; instância e rede no doc 03 §7. |
 | Python | Linguagem de implementação. | DEC-06. |
 
 ### 2.4 Restrições de projeto e implementação
@@ -554,3 +554,4 @@ Nenhuma pendência aberta que afete a V0.1. Resolvidas em 23/10/2026: PD-06 → 
 | 0.2 | 23/10/2026 | Alinhado ao doc 06: RF-192 a RF-194 (diferencial e snapshots do livro); RF-107 passa a backfill de `aggTrades`; unidade de tempo decidida; PD-06 e PD-14 resolvidas. |
 | 0.3 | 23/10/2026 | Ambiente operacional alinhado ao doc 03 (Tóquio, Amazon Linux 2023 ARM64); RNF-009 e PD-13 referenciam as propostas do doc 03. |
 | 0.4 | 23/10/2026 | PD-13 resolvida (DEC-24). |
+| 0.5 | 23/10/2026 | Ambiente operacional na us-east-2 (DEC-26). Na produção, RF-146 recorre ao arquivo diário, porque `historicalTrades` responde 451 de lá (doc 06 MD-18). |

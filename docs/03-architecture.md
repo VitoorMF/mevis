@@ -2,11 +2,11 @@
 
 | Campo | Valor |
 |---|---|
-| Projeto | Sistema de trading algorítmico com IA — *nome a definir (PD-01)* |
+| Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.4 — rascunho |
+| Versão | 0.6 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
-| Status | DEC-21 a DEC-24 tomadas; ADR-01 a ADR-12 **aprovadas** (DEC-24) |
+| Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.6; [02 — SRS](02-srs.md) v0.3; [06 — Data & Integrations](06-data-integrations.md) v0.2 |
 
@@ -16,7 +16,7 @@
 
 Este documento define **como** o sistema é construído e onde roda: estilo arquitetural, processos, módulos, fluxos, infraestrutura AWS, segurança, custos, falhas e implantação. O **o quê** está no SRS; os contratos de dados estão no doc 06.
 
-Preços foram consultados na AWS Price List API em 23/10/2026 (região de Tóquio, salvo indicação) e podem mudar.
+Preços foram consultados na AWS Price List API em 23/10/2026 (região us-east-2, salvo indicação) e podem mudar.
 
 ---
 
@@ -26,10 +26,11 @@ Preços foram consultados na AWS Price List API em 23/10/2026 (região de Tóqui
 
 | ID | Tema | Decisão | Resolve |
 |---|---|---|---|
-| DEC-21 | Região | **Tóquio (`ap-northeast-1`)**: amplamente relatada como a região dos servidores da Binance, com custo próximo ao das regiões mais baratas. Frankfurt (`eu-central-1`) fica como alternativa caso a conectividade falhe (R-18). | PD-04 (região) |
+| DEC-21 | Região | **Tóquio (`ap-northeast-1`)**: amplamente relatada como a região dos servidores da Binance, com custo próximo ao das regiões mais baratas. Frankfurt (`eu-central-1`) fica como alternativa caso a conectividade falhe (R-18). | PD-04 (região) — **substituída por DEC-26** |
 | DEC-22 | Infraestrutura como código | **Terraform.** | — |
-| DEC-23 | Plano depois dos créditos | t4g.micro sob demanda (~US$ 15/mês), dentro do teto de **R$ 100/mês** (DEC-16, revisto em 23/10/2026). O CP-3 (§10.4) confirma com consumo medido e avalia se a V0.3 exige t4g.small. | Parte de DEC-16 |
+| DEC-23 | Plano depois dos créditos | t4g.micro sob demanda (~US$ 13/mês em us-east-2), dentro do teto de **R$ 100/mês** (DEC-16, revisto em 23/10/2026). O CP-3 (§10.4) confirma com consumo medido e avalia se a V0.3 exige t4g.small. | Parte de DEC-16 |
 | DEC-24 | Arquitetura | ADR-01 a ADR-12 abaixo aprovadas. | PD-12, PD-13 |
+| DEC-26 | Região | **Ohio (`us-east-2`)**: a única que a conta aceita (§2.2). Coleta só pelos endpoints `*.binance.vision`. Tóquio fica como plano B, exigindo plano pago e recursos avançados. | Substitui DEC-21 |
 
 ### 1.2 Decisões de arquitetura (aprovadas em 23/10/2026 — DEC-24)
 
@@ -76,6 +77,8 @@ Latência **não** é prioridade: o horizonte é de minutos (DEC-15).
 | Teste gratuito do t4g.small: 750 h/mês até 31/12/2026, para clientes novos e antigos. | Documentação AWS; [A VERIFICAR na fatura de novembro] | Instância inicial sem custo de computação. |
 | IPv4 público: 750 h/mês grátis nos primeiros 12 meses para clientes do Free Tier de EC2. | Documentação AWS; [A VERIFICAR na fatura de novembro] | Pode zerar US$ 3,65/mês. |
 | Binance sem endereço IPv6 (sem registro AAAA). | DNS, 23/10/2026 | IPv4 público é obrigatório (sem NAT, que custaria mais). |
+| A conta pertence a uma organização gerenciada pela AWS (nova experiência), cuja SCP nega chamadas fora da **us-east-2**; testadas e negadas: us-east-1, us-west-2, ca-central-1, sa-east-1, eu-central-1, eu-west-1, ap-northeast-1 e ap-southeast-1. | `terraform plan` e chamadas de leitura, 23/10/2026 | DEC-26. Outras regiões só depois de passar ao plano pago, ativar os recursos avançados (irreversível) e editar a SCP `RegionFloor`. |
+| Da us-east-2, `api.binance.com` e `stream.binance.com` respondem HTTP 451; `data-api.binance.vision`, `data-stream.binance.vision` e `data.binance.vision` respondem. | CloudShell, 23/10/2026 (doc 06 MD-16 a MD-21) | O host usa só `*.binance.vision`; lacunas de negócios só pelos arquivos diários. |
 
 ---
 
@@ -204,7 +207,7 @@ HH:05 ─► fechar órfãos ─► comprimir e verificar arquivos fechados ─�
 
 - **Órfãos:** um arquivo `.open` é fechado pelo pipeline se a sessão consta como encerrada ou se a hora dele terminou há mais de 5 minutos (o coletor vivo fecha arquivos na virada da hora).
 - **Quando uma hora é normalizada:** quando nenhum arquivo bruto dela está aberto. Lê a hora H e 5 minutos de margem das horas vizinhas, em ordem global de recebimento entre sessões, e particiona pelo horário do evento (negócios, candles) ou do primeiro recebimento (livro).
-- **Renormalização automática:** um resumo das entradas (arquivos brutos de H-1 a H+1, lacunas e offsets de relógio próximos) fica no `state.db`. Se mudar — arquivo vizinho que fechou depois, lacuna detectada mais tarde, recuperação —, a hora é refeita. `trader pipeline --rebuild` refaz todas (RF-133), desde que as entradas ainda estejam no disco local.
+- **Renormalização automática:** um resumo das entradas (arquivos brutos da hora anterior, da própria hora e da seguinte; lacunas e offsets de relógio próximos) fica no `state.db`. Se mudar — arquivo vizinho que fechou depois, lacuna detectada mais tarde, recuperação —, a hora é refeita. `trader pipeline --rebuild` refaz todas (RF-133), desde que as entradas ainda estejam no disco local.
 - **Idempotente:** cada etapa consulta o `state.db`; reexecutar não duplica nada.
 - **Exclusivo:** um `flock` impede duas execuções simultâneas.
 - **Memória limitada:** em fluxo; só as chaves já vistas ficam em memória, e o Parquet é gravado em blocos. Uma hora real de teste usou ~125 MB.
@@ -221,7 +224,7 @@ O `trader-recovery` lê as lacunas abertas no `state.db`. Para cada uma, aplica 
 
 ### 7.1 Conta (ADR-09)
 
-- **Conta:** somente a conta nova, com créditos. O id dela deve ser confirmado e registrado na configuração do Terraform [A VERIFICAR].
+- **Conta:** somente a conta nova, com créditos: **019419901344**, confirmada pelo responsável em 23/10/2026. Perfil do AWS CLI: `trader`.
 - **Proteções contra a conta errada:**
   - perfil dedicado do AWS CLI (por exemplo, `trader`), separado do perfil padrão, que hoje aponta para 724772086347;
   - `allowed_account_ids` no provider do Terraform, que recusa qualquer outra conta;
@@ -260,7 +263,7 @@ O `trader-recovery` lê as lacunas abertas no `state.db`. Para cada uma, aplica 
 
 | Recurso | Configuração |
 |---|---|
-| Bucket de dados `trader-data-<conta>-apne1` | Bloqueio de acesso público total; criptografia SSE-S3; versionamento ativo; política que nega acesso sem TLS. |
+| Bucket de dados `trader-data-<conta>-<região>` | Bloqueio de acesso público total; criptografia SSE-S3; versionamento ativo; política que nega acesso sem TLS. |
 | Prefixos | `raw/`, `normalized/`, `quarantine/`, `ops/` (cópias do `state.db`), `artifacts/` (versões do software). |
 | Ciclo de vida | Versões não atuais expiram em 30 dias; uploads multipartes incompletos são abortados em 7 dias. Transição para classe mais barata: avaliar em CP-3. |
 | Bucket de estado do Terraform | Separado, privado, versionado (ADR-10). |
@@ -286,14 +289,16 @@ O `trader-recovery` lê as lacunas abertas no `state.db`. Para cada uma, aplica 
 
 **Alertas:** tópico SNS `trader-alerts` com assinatura por e-mail (camada gratuita de 1000 e-mails/mês).
 
-**Custos:** AWS Budgets (gratuito sem ações) com alertas por e-mail em 50%, 80% e 100% de um valor mensal, e alerta de previsão; mais os alertas nativos do plano gratuito.
+**Custos:** AWS Budgets (gratuito sem ações) com alertas por e-mail em 50%, 80% e 100% de US$ 20/mês, e alerta de previsão; mais os alertas nativos do plano gratuito. O orçamento mede o custo **bruto**, sem descontar créditos, para mostrar o ritmo de consumo deles.
+
+**Dimensões das métricas [A VERIFICAR na primeira implantação]:** os alarmes esperam `InstanceId` + `metric_type=gauge` nas métricas StatsD (o agente publica com `append_dimensions` de `InstanceId`) e `InstanceId`, `path=/`, `fstype=xfs` no disco. Se divergirem, o alarme de sinal de vida dispara de imediato, o que expõe o erro (runbook em `infra/README.md`, passo 8). As ações dos alarmes da aplicação ficam desligadas (`app_alarms_enabled`) até a coleta começar.
 
 ### 7.6 Terraform (DEC-22, ADR-10)
 
 ```text
 infra/
   bootstrap/          bucket de estado (estado local; executado uma vez)
-  envs/prod/          provider (ap-northeast-1, allowed_account_ids, default_tags), backend S3
+  envs/prod/          provider (us-east-2, allowed_account_ids, default_tags), backend S3
   modules/
     network/          VPC, sub-rede, IGW, rotas, endpoint S3, security group
     data_bucket/      bucket de dados, políticas, ciclo de vida
@@ -326,10 +331,10 @@ infra/
 
 ### 9.1 Artefato e instalação
 
-1. No MacBook: testes → `uv build` → wheel versionada (versão do pacote + commit).
-2. Envio para `s3://…/artifacts/<versão>/` com o `uv.lock` correspondente.
-3. No host, via SSM: o script `trader-deploy <versão>` baixa o artefato, cria um ambiente novo em `/opt/trader/<versão>` e atualiza o link `current`.
-4. Rollback: `trader-deploy <versão anterior>`.
+1. No MacBook, com a árvore Git limpa: `scripts/publish-artifact.sh` gera a wheel, um `requirements.txt` com hashes (exportado do `uv.lock`) e um `SHA256SUMS`, e envia para `s3://…/artifacts/<versão do pacote>-<commit>/`.
+2. No host, via SSM: `sudo trader-deploy <versão>` baixa o artefato, confere os hashes, cria um ambiente novo em `/opt/trader/releases/<versão>` (Python 3.12 gerenciado pelo `uv`, instalação com `--require-hashes`) e troca o link `current` de forma atômica.
+3. Sem coletor ativo, só instala; com `--start`, ou se já houver coletor ativo, faz a troca sem lacuna (§9.2).
+4. Rollback: `sudo trader-deploy <versão anterior>`.
 
 O host não precisa de acesso a repositório Git nem de credenciais de terceiros.
 
@@ -337,35 +342,37 @@ O host não precisa de acesso a repositório Git nem de credenciais de terceiros
 
 Unidades modelo `trader-collector@a` e `trader-collector@b`:
 
-1. Inicia a cor ociosa com a nova versão.
-2. Espera o arquivo de saúde mostrar todos os canais recebendo.
-3. Para a cor antiga.
+1. Inicia a cor ociosa com a nova versão (`trader collect --instance <cor>`).
+2. Espera o arquivo de saúde da cor nova (`health/collector-<cor>.json`) mostrar todos os canais recebendo, por até 120 s.
+3. Para e desabilita a cor antiga; habilita a nova. Se a nova não ficar pronta, ela é parada e a antiga continua.
 
 Durante a sobreposição, as duas gravam em sessões distintas (doc 06 §3.3), e a deduplicação acontece na normalização. Os demais processos só trocam o link `current`.
 
 ### 9.3 Inicialização do host
 
-O `user data` (cloud-init) instala o `uv` e o agente do CloudWatch, cria o usuário de serviço e os diretórios, instala as unidades `systemd` e implanta a versão indicada.
+O `user data` (cloud-init) instala o `uv` e o agente do CloudWatch (StatsD local, memória, disco e envio dos logs), cria o usuário de serviço, os diretórios e um swap de 1 GB, grava `/etc/trader/trader.toml`, instala as unidades `systemd` (`trader-collector@.service`, `trader-pipeline.service` e `.timer` às HH:05 UTC), o `logrotate` e o `trader-deploy`. **Não** inicia o coletor: isso só acontece depois do teste de fumaça (§9.4).
 
 ### 9.4 Sequência da primeira implantação
 
 1. **Bootstrap** do estado do Terraform.
-2. **Teste de fumaça:** subir só a rede e a instância e executar `trader smoke` (10 min de WebSocket, chamadas REST, latência, offset). Se houver HTTP 451 ou falha de conectividade: destruir e trocar a região para Frankfurt.
-3. Bucket, observabilidade e alarmes.
-4. Coletor e timers. Início da contagem de CA-01 (7 dias).
+2. **Ambiente completo** (rede, bucket, observabilidade, host), com as ações dos alarmes da aplicação desligadas.
+3. **Teste de fumaça:** `trader-deploy <versão>` (só instala) e `trader smoke` (10 min de WebSocket em cada endpoint principal, checagem curta dos alternativos, REST com ida e volta e offset, `historicalTrades` sem chave). Na us-east-2, `api.binance.com` e `historicalTrades` saem como **aviso** (451 esperado). Falha nos endpoints `*.binance.vision` impede a coleta: plano B (DEC-26).
+4. Coletor (`trader-deploy <versão> --start`) e timer do pipeline; conferência das dimensões das métricas; alarmes ligados. Início da contagem de CA-01 (7 dias).
+
+O passo a passo com comandos está em `infra/README.md`.
 
 ---
 
 ## 10. Custos e créditos
 
-### 10.1 Preços de referência (Tóquio, 730 h/mês)
+### 10.1 Preços de referência (us-east-2, 730 h/mês)
 
 | Item | US$/mês |
 |---|---|
-| t4g.small / t4g.micro / t4g.nano | 15,77 / 7,88 / 3,94 |
-| gp3, 16 GB | 1,54 |
+| t4g.small / t4g.micro / t4g.nano | 12,26 / 6,13 / 3,07 |
+| gp3, 16 GB | 1,28 |
 | IPv4 público | 3,65 (ou 0 se houver franquia de 750 h) |
-| S3 Standard (US$ 0,025/GB-mês) | ~0,19 no 1º mês → ~2,10 no 12º (doc 06 §6.3) |
+| S3 Standard (US$ 0,023/GB-mês) | ~0,17 no 1º mês → ~1,96 no 12º (doc 06 §6.3) |
 | CloudWatch, SNS, SSM, Budgets, endpoint S3 | 0 dentro das camadas gratuitas |
 | Transferência para o MacBook | 0 até 100 GB/mês |
 
@@ -373,20 +380,21 @@ O `user data` (cloud-init) instala o `uv` e o agente do CloudWatch, cria o usuá
 
 | Fase | Instância | US$/mês |
 |---|---|---|
-| Até 31/12/2026 | t4g.small (teste gratuito) | 1,7 – 5,6 |
-| 01/01/2027 – 12/04/2027 | t4g.small | 17,7 – 21,9 |
-| | t4g.micro | 9,8 – 14,0 |
-| Após os créditos (estimativa no 12º mês) | t4g.micro | ~15 |
-| | t4g.nano (plano pago) | ~11 |
+| Até 31/12/2026 | t4g.small (teste gratuito) | 1,5 – 5,3 |
+| 01/01/2027 – 12/04/2027 | t4g.small | 13,9 – 18,0 |
+| | t4g.micro | 7,8 – 11,9 |
+| Após os créditos (estimativa no 12º mês) | t4g.small | ~19 |
+| | t4g.micro | ~13 |
+| | t4g.nano (plano pago) | ~10 |
 
-Faixas: com e sem franquia de IPv4; crescimento do S3. Referência do teto: R$ 100 ≈ US$ 20 (câmbio de ~R$ 5,0 em 07/10/2026). Depois dos créditos, t4g.micro cabe com folga; t4g.small fica ligeiramente acima.
+Faixas: com e sem franquia de IPv4; crescimento do S3. Referência do teto: R$ 100 ≈ US$ 20 (câmbio de ~R$ 5,0 em 07/10/2026). Depois dos créditos, t4g.micro cabe com folga; t4g.small fica no limite.
 
 ### 10.3 Consumo dos créditos (US$ 180)
 
 | Cenário | Gasto até 12/04/2027 | Saldo na passagem ao plano pago | Até a expiração dos créditos (~10/2027) |
 |---|---|---|---|
-| A — micro a partir de jan/2027, IPv4 grátis | ~38 | ~142 | Sobram créditos: daria para manter o t4g.small. |
-| B — small o tempo todo, IPv4 pago | ~86 | ~94 | Créditos acabam por volta de ago/2027. |
+| A — micro a partir de jan/2027, IPv4 grátis | ~30 | ~150 | Sobram créditos: dá para manter o t4g.small. |
+| B — small o tempo todo, IPv4 pago | ~71 | ~109 | Créditos acabam por volta de set/2027. |
 
 Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura de novembro vai mostrar (franquia de IPv4 e teste do t4g.small no plano gratuito) e do consumo medido. Por isso existe o CP-1.
 
@@ -422,7 +430,7 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | Perda do disco ou da instância | Alarmes | Recriar com Terraform; implantar | Até ~1 h de dados não replicados |
 | Indisponibilidade da zona ou região | Alarmes | Aguardar; aceito pelo custo | Duração do evento |
 | Disco cheio (replicação parada) | `disk_used_percent` | Alarme com ~30 dias de antecedência | Nenhuma, se tratado |
-| Bloqueio da Binance na região | Teste de fumaça; `MaxChannelAgeSeconds` | Trocar a região para Frankfurt | Até a troca |
+| Bloqueio dos endpoints `*.binance.vision` nos EUA | Teste de fumaça; `MaxChannelAgeSeconds`; `Heartbeat` | Plano B (DEC-26): plano pago, recursos avançados, SCP com Tóquio e `region` no Terraform | Até a troca |
 | **Fechamento da conta** (fim do plano gratuito) | Calendário (CP-2) | Passar ao plano pago antes de 12/04/2027; cópia mensal offline dos dados brutos no MacBook ou em disco externo [PROPOSTA] | Todo o histórico, se ignorado |
 
 ---
@@ -449,9 +457,10 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 
 | Item | Quando |
 |---|---|
-| Confirmar o id da conta nova e a data de expiração dos créditos | Antes do primeiro `terraform apply` |
+| Confirmar a data de expiração dos créditos (id da conta já confirmado: 019419901344) | Antes do primeiro `terraform apply` |
+| Conferir as dimensões das métricas StatsD publicadas pelo agente | Primeira implantação |
 | Confirmar na fatura: franquia de IPv4 e teste do t4g.small no plano gratuito | CP-1 |
-| Conectividade e latência a partir de Tóquio | Teste de fumaça (§9.4) |
+| Latência e offset a partir da us-east-2 (conectividade já medida no CloudShell) | Teste de fumaça (§9.4) |
 | Termos de uso da Binance (doc 06 §12) | Antes da coleta contínua |
 | Repositório Git do projeto | Antes da implementação |
 
@@ -482,3 +491,5 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.2 | 23/10/2026 | ADR-01 a ADR-12 aprovadas (DEC-24); teto pós-créditos de R$ 100/mês; DEC-23 e CP-3 reescritos. |
 | 0.3 | 23/10/2026 | §6.2 detalha o buffer e a sobreposição da rotação; §4.2 inclui as marcas d'água no `state.db` (ambos implementados no coletor). |
 | 0.4 | 23/10/2026 | §5 inclui o módulo `pipeline`; §6.3 descreve órfãos, elegibilidade, renormalização por resumo das entradas, memória e réplica, como implementados. |
+| 0.5 | 23/10/2026 | Conta 019419901344 confirmada; §7.5 com orçamento bruto e dimensões a verificar; §9 com o fluxo implementado (publish-artifact, trader-deploy, troca a/b, smoke); infraestrutura em `infra/`. |
+| 0.6 | 23/10/2026 | DEC-26: região us-east-2 (a conta só aceita essa região; acesso à Binance medido); custos recalculados com preços da us-east-2; plano B para Tóquio. |

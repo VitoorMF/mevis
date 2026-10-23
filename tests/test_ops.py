@@ -124,3 +124,23 @@ def test_json_log_lines_include_context() -> None:
     assert entry["msg"] == "lacuna"
     assert entry["level"] == "WARNING"
     assert entry["channel"] == "btcusdt@trade"
+
+
+def test_instance_name_is_validated() -> None:
+    assert CollectorConfig(instance="b").validate().instance == "b"
+    with pytest.raises(ConfigError):
+        CollectorConfig(instance="b/../x").validate()
+
+
+def test_pipeline_config_inherits_collector_settings(tmp_path: Path) -> None:
+    from trader.ops.config import load_pipeline_config
+
+    path = tmp_path / "trader.toml"
+    path.write_text(
+        '[collector]\ndata_dir = "/var/lib/trader"\nstatsd_host = "127.0.0.1"\n'
+        '[pipeline]\nreplica_s3_bucket = "b"\naws_region = "ap-northeast-1"\n'
+    )
+    config = load_pipeline_config(path)
+    assert config.data_dir == Path("/var/lib/trader")
+    assert config.statsd_host == "127.0.0.1"
+    assert config.replica_s3_bucket == "b"

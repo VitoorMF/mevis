@@ -1,0 +1,6 @@
+# Copie para terraform.tfvars (ignorado pelo Git) e preencha.
+account_id         = "019419901344"
+alert_email        = "seu-email@exemplo.com"
+instance_type      = "t4g.small"
+monthly_budget_usd = 20
+app_alarms_enabled = false

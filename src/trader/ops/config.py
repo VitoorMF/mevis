@@ -48,6 +48,8 @@ class CollectorConfig:
     rest_weight_budget_per_min: int = 1200
     statsd_host: str | None = None
     statsd_port: int = 8125
+    instance: str = "main"
+    """Nome da instância (`a` ou `b` na troca sem lacuna); separa o arquivo de saúde."""
 
     @property
     def streams(self) -> tuple[str, ...]:
@@ -79,6 +81,10 @@ class CollectorConfig:
             raise ConfigError("snapshot_limit deve estar entre 1 e 5000")
         if self.backoff_initial_s > self.backoff_max_s:
             raise ConfigError("backoff_initial_s maior que backoff_max_s")
+        if not self.instance.replace("-", "").isalnum():
+            raise ConfigError(
+                f"instance deve ser alfanumérico (hífen permitido): {self.instance!r}"
+            )
         return self
 
 
@@ -96,6 +102,12 @@ class PipelineConfig:
     clock_reference_window_s: float = 600.0
     local_retention_days: float = 7.0
     replica_dir: Path | None = None
+    """Réplica em diretório local (desenvolvimento)."""
+    replica_s3_bucket: str | None = None
+    """Réplica no S3 (produção, RF-136). Tem prioridade sobre `replica_dir`."""
+    aws_region: str | None = None
+    statsd_host: str | None = None
+    statsd_port: int = 8125
     trades_row_group: int = 50_000
     books_row_group: int = 2_000
 
@@ -134,7 +146,8 @@ def _check_keys(cls: type, values: Mapping[str, Any]) -> None:
 def load_pipeline_config(path: Path | None = None, **overrides: Any) -> PipelineConfig:
     tables = _read_tables(path)
     collector = tables.get("collector", {})
-    values: dict[str, Any] = {k: collector[k] for k in ("symbol", "data_dir") if k in collector}
+    shared = ("symbol", "data_dir", "statsd_host", "statsd_port")
+    values: dict[str, Any] = {k: collector[k] for k in shared if k in collector}
     values.update(tables.get("pipeline", {}))
     values.update({k: v for k, v in overrides.items() if v is not None})
     _check_keys(PipelineConfig, values)

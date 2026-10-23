@@ -21,3 +21,9 @@ data/
 # Ambiente e sistema
 .env
 .DS_Store
+
+# Terraform: variáveis reais (conta, e-mail) ficam fora do Git; o .terraform.lock.hcl entra
+terraform.tfvars
+
+# Artefatos de implantação
+dist/

@@ -2,9 +2,9 @@
 
 | Campo | Valor |
 |---|---|
-| Projeto | Sistema de trading algorítmico com IA — *nome a definir (PD-01)* |
+| Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.4 — rascunho |
+| Versão | 0.5 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -85,6 +85,21 @@ Amostra de 100 s; o número de negócios foi escalado para a mediana diária dos
 
 Streams cujo volume depende da atividade (`trade`, diferencial) podem crescer cerca de 1,7× em dias de pico. As razões de compressão vêm de arquivos pequenos e tendem a ser conservadoras.
 
+### 2.4 Acesso a partir da AWS (us-east-2)
+
+Medido no AWS CloudShell da conta do projeto, em 23/10/2026, depois de descobrir que a conta só aceita a us-east-2 (doc 03 §2.2).
+
+| ID | Medição | Resultado |
+|---|---|---|
+| MD-16 | REST `api.binance.com/api/v3/time` | **HTTP 451** (bloqueio geográfico). |
+| MD-17 | REST `data-api.binance.vision/api/v3/time` | HTTP 200. |
+| MD-18 | REST `api.binance.com/api/v3/historicalTrades` | **HTTP 451**. |
+| MD-19 | Arquivos `data.binance.vision` | HTTP 200. |
+| MD-20 | WebSocket `wss://data-stream.binance.vision` | Conecta e entrega negócios. |
+| MD-21 | WebSocket `wss://stream.binance.com:9443` | **HTTP 451** no handshake. |
+
+**Consequência (DEC-26):** o host de produção usa só os endpoints `*.binance.vision`, que a própria Binance oferece para dados de mercado; a recuperação imediata de negócios pela REST não está disponível de lá, e as lacunas de negócios são preenchidas pelos arquivos diários.
+
 ---
 
 ## 3. Fontes e integrações
@@ -104,9 +119,9 @@ Streams cujo volume depende da atividade (`trade`, diferencial) podem crescer ce
 
 | Uso | Principal | Alternativo | Observação |
 |---|---|---|---|
-| WebSocket | `wss://data-stream.binance.vision` | `wss://stream.binance.com:9443` (ou `:443`) | Exclusivo de dados de mercado (FV-03). |
-| REST — snapshot, klines, horário, `exchangeInfo` | `https://data-api.binance.vision` | `https://api.binance.com` | Escolha final após medir a partir da região AWS: no Brasil o alternativo foi ~4× mais rápido (MD-01, MD-02). |
-| REST — `historicalTrades` | `https://api.binance.com` | — | Indisponível no endpoint de dados de mercado (MD-06). Não exige chave. |
+| WebSocket | `wss://data-stream.binance.vision` | `wss://stream.binance.com:9443` (ou `:443`) — **não em produção**: responde 451 na us-east-2 (MD-21) | Exclusivo de dados de mercado (FV-03). Único endpoint do host de coleta (DEC-26). |
+| REST — snapshot, klines, horário, `exchangeInfo` | `https://data-api.binance.vision` | `https://api.binance.com` — **não em produção**: responde 451 na us-east-2 (MD-16) | No Brasil o alternativo foi ~4× mais rápido (MD-01, MD-02); na AWS só o principal funciona. |
+| REST — `historicalTrades` | `https://api.binance.com` | — | Indisponível no endpoint de dados de mercado (MD-06) e bloqueado na us-east-2 (MD-18): no host de produção, lacunas de negócios só pelos arquivos diários (§9). Não exige chave. |
 | Arquivos | `https://data.binance.vision` | — | Checksum SHA-256 por arquivo. |
 
 ### 3.3 Streams coletados
@@ -331,7 +346,7 @@ A transição para classes de armazenamento mais baratas no S3 (por idade) será
 | Backfill (§7), carga única [ESTIMATIVA] | — | — | ~5 a 10 GB |
 | **Total** | **~250 MB** | **~7,6 GB** | **~85 GB** |
 
-Custo de armazenamento S3 Standard ao fim de 12 meses em Tóquio (US$ 0,025/GB-mês, DEC-21): cerca de US$ 2,10 por mês (doc 03 §10). Requisições de gravação (dezenas de arquivos por hora) custam centavos por mês. A transferência para o MacBook entra na franquia mensal de saída para a internet [A VERIFICAR].
+Custo de armazenamento S3 Standard ao fim de 12 meses na us-east-2 (US$ 0,023/GB-mês, DEC-26): cerca de US$ 1,96 por mês (doc 03 §10). Requisições de gravação (dezenas de arquivos por hora) custam centavos por mês. A transferência para o MacBook entra na franquia mensal de saída para a internet [A VERIFICAR].
 
 ---
 
@@ -391,7 +406,7 @@ Se mais de um estado se aplica ao minuto, prevalece o pior. A pesquisa (V0.2) e 
 
 | Canal | Como a lacuna é detectada | Recuperável | Fonte e momento |
 |---|---|---|---|
-| `trade` | Salto de id; reconexão | Sim | REST `historicalTrades` a partir do primeiro id ausente, imediatamente (alcance de ~2 anos, MD-07); arquivo diário no dia seguinte, se a REST falhar. |
+| `trade` | Salto de id; reconexão | Sim | Onde `api.binance.com` responde: REST `historicalTrades` a partir do primeiro id ausente, imediatamente (alcance de ~2 anos, MD-07). **No host de produção (us-east-2), só pelo arquivo diário, no dia seguinte (MD-18).** |
 | `kline_1m` | Minuto ausente; reconexão | Sim | REST `klines`, imediatamente. |
 | `depth20@100ms` | Silêncio > 2 s; reconexão | **Não** | Lacuna marcada como irrecuperável. |
 | `depth@100ms` | Quebra de `U`/`u`; reconexão | **Não** | Lacuna marcada; novo snapshot REST para reancorar a reconstrução futura. |
@@ -432,7 +447,7 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 
 | Item | Situação |
 |---|---|
-| Termos de uso da API da Binance | [A VERIFICAR] antes de iniciar a coleta contínua. Premissa: uso pessoal, sem redistribuição dos dados brutos. |
+| Termos de uso da API da Binance | [A VERIFICAR] antes de iniciar a coleta contínua — **mais importante agora**: a coleta roda nos EUA, por endpoints de dados de mercado que a Binance mantém acessíveis de lá (MD-17, MD-20), sem proxy nem VPN (RN-015). Premissa: uso pessoal, sem redistribuição dos dados brutos. |
 | Termos dos arquivos públicos (data.binance.vision) | [A VERIFICAR]. |
 | Bucket S3 | Privado, criptografado, sem acesso público (RNF-017). Dados brutos não são publicados nem compartilhados. |
 | Restrição geográfica | Testar conectividade a partir da região AWS antes de provisionar (PR-12); nunca contornar com proxy ou VPN (RN-015). |
@@ -479,3 +494,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.2 | 23/10/2026 | Custo de S3 com o preço de Tóquio (DEC-21); pendência de preços movida para o CP-3. |
 | 0.3 | 23/10/2026 | Pendências atualizadas com a primeira coleta local (frequência do top 20; precisão da sonda de relógio). |
 | 0.4 | 23/10/2026 | Regras do pipeline implementado: partição e ordem dos datasets, quarentena por hora, cópia divergente (fica a primeira; minuto `invalid`). |
+| 0.5 | 23/10/2026 | §2.4 com o acesso medido a partir da us-east-2 (MD-16 a MD-21); endpoints e recuperação de negócios ajustados para produção nos EUA (DEC-26); custo de S3 com preço da us-east-2. |

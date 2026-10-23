@@ -142,6 +142,7 @@ class Collector:
         self._rest_seq = 0
         self._stats: defaultdict[str, _ChannelStats] = defaultdict(_ChannelStats)
         self._gaps_total = 0
+        self._gaps_since_metrics = 0
         self._reconnects = 0
         self._malformed = 0
         self._messages_since_metrics = 0
@@ -442,6 +443,7 @@ class Collector:
     def _record_gap(self, gap: GapRecord) -> None:
         self._state.record_gap(gap)
         self._gaps_total += 1
+        self._gaps_since_metrics += 1
         log.warning(
             "lacuna detectada",
             extra=ctx(
@@ -546,11 +548,13 @@ class Collector:
             ]
             self._metrics.gauge("Heartbeat", 1)
             self._metrics.gauge("MaxChannelAgeSeconds", min(max(ages), 1e6))
-            self._metrics.gauge("GapsDetected", self._gaps_total)
+            # Contagens por intervalo: o alarme soma os pontos (doc 03 §7.5).
+            self._metrics.gauge("GapsDetected", self._gaps_since_metrics)
             self._metrics.gauge("MessagesPerMinute", self._messages_since_metrics)
             if self._last_offset_us is not None:
                 self._metrics.gauge("ClockOffsetMs", abs(self._last_offset_us) / 1000)
             self._messages_since_metrics = 0
+            self._gaps_since_metrics = 0
 
     async def _guard(self, loop: Coroutine[Any, Any, None]) -> None:
         """Erro inesperado em rotina de fundo é fatal: melhor reiniciar que gravar sem fsync."""
@@ -590,9 +594,10 @@ class Collector:
         now = self._clock.now_us()
         primary = self._primary
         write_health(
-            health_path(self._config.data_dir),
+            health_path(self._config.data_dir, self._config.instance),
             {
                 "status": status,
+                "instance": self._config.instance,
                 "version": self._code_version,
                 "updated_ts_us": now,
                 "started_ts_us": self._started_us,

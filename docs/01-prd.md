@@ -2,9 +2,9 @@
 
 | Campo | Valor |
 |---|---|
-| Projeto | Sistema de trading algorítmico com IA — *nome a definir (PD-01)* |
+| Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 01 — PRD |
-| Versão | 0.6 — rascunho |
+| Versão | 0.8 — rascunho |
 | Status | Decisões até DEC-24; aguardando confirmação da conta AWS e revisão final (§19) |
 | Data | 23/10/2026 |
 | Responsável pelo produto | *a preencher* |
@@ -218,7 +218,7 @@ Ao final do MVP, o produto:
 | Linguagem | Python | [DECISÃO] |
 | Modelos iniciais | Baselines simples e XGBoost | [DECISÃO] (sugestão inicial) |
 | Interface de operação | Linha de comando, relatórios e logs | [PENDENTE] PD-10 |
-| Ambiente de execução | MacBook para desenvolvimento; coleta contínua e paper trading 24/7 na AWS (EC2) | [DECISÃO] DEC-17; região Tóquio (DEC-21); instância e divisão MacBook × AWS: doc 03 |
+| Ambiente de execução | MacBook para desenvolvimento; coleta contínua e paper trading 24/7 na AWS (EC2) | [DECISÃO] DEC-17; região Ohio, us-east-2 (DEC-26); instância e divisão MacBook × AWS: doc 03 |
 | Orçamento | Créditos AWS (US$ 180) e Free Tier, sem despesas adicionais; depois dos créditos, teto de R$ 100/mês | [DECISÃO] DEC-16 |
 
 ### 8.3 Escopo por versão
@@ -385,7 +385,7 @@ Premissas são condições tomadas como verdadeiras para planejar. Se uma se mos
 | PR-09 | Os créditos (US$ 180) estão numa conta nova, no plano gratuito, que expira em 12/04/2027. Os créditos valem 12 meses a partir da criação da conta (~10/2027) e cobrem EC2, VPC, S3 e CloudWatch. | Plano e saldo informados pelo responsável em 23/10/2026; validade dos créditos [A VERIFICAR] (doc 03 §2.2) |
 | PR-10 | O relógio do host de coleta é sincronizado; a diferença entre o horário da exchange e o local será medida e registrada. | **Falsa para o MacBook:** relógio atrasado ~0,4 s em 23/10/2026 (doc 06 MD-14). Na AWS: doc 03 |
 | PR-11 | A conta configurada hoje no AWS CLI do MacBook (724772086347, criada em 07/09/2024, no modelo antigo de Free Tier, com recursos de outros projetos) **não é** a conta dos créditos. O projeto usa apenas a conta nova (doc 03 ADR-09). | Verificado em 23/10/2026 (consulta somente leitura); corrige a redação da v0.2 |
-| PR-12 | A Binance (binance.com) bloqueia acesso a partir de algumas jurisdições, incluindo endereços IP dos Estados Unidos (respostas HTTP 451). A região AWS da coleta precisa ficar fora dessas jurisdições, o que exclui regiões dos EUA, como us-east-1. Relatos de comunidade indicam bloqueio também de algumas faixas de IP de datacenter fora dos EUA; a documentação da API não trata do assunto. | [A VERIFICAR] — testar conectividade a partir da região antes de provisionar (docs 03 e 06) |
+| PR-12 | A Binance bloqueia IPs dos EUA em `api.binance.com` e `stream.binance.com` (HTTP 451), mas os endpoints só de dados de mercado (`data-api.binance.vision`, `data-stream.binance.vision`) e os arquivos públicos (`data.binance.vision`) respondem a partir da us-east-2. | Medido no CloudShell em 23/10/2026 (doc 06 MD-16 a MD-21) |
 
 ---
 
@@ -401,7 +401,7 @@ Premissas são condições tomadas como verdadeiras para planejar. Se uma se mos
 | RS-06 | **Segurança operacional.** | Nenhuma credencial de conta real; o modelo não tem acesso direto à execução — só por meio do Risk Manager. |
 | RS-07 | **Regulatória.** | Uso estritamente pessoal. Oferecer sinais ou administrar recursos de terceiros exigiria análise regulatória (CVM, Banco Central, regras de criptoativos) antes de qualquer iniciativa. |
 | RS-08 | **Equipe de uma pessoa.** | O escopo de cada versão deve caber em um desenvolvedor; prioridades MoSCoW são obrigatórias. |
-| RS-09 | **Orçamento:** créditos AWS de US$ 180 e Free Tier, sem despesas adicionais enquanto houver créditos; depois, teto de R$ 100/mês (DEC-16). | O teto equivale a cerca de US$ 20/mês (câmbio de ~R$ 5,0). Em Tóquio, depois dos benefícios gratuitos, t4g.micro custa ~US$ 15/mês (dentro do teto) e t4g.small ~US$ 22/mês (ligeiramente acima), incluindo IPv4, disco e S3. Confirmação no CP-3 (DEC-23; doc 03 §10). |
+| RS-09 | **Orçamento:** créditos AWS de US$ 180 e Free Tier, sem despesas adicionais enquanto houver créditos; depois, teto de R$ 100/mês (DEC-16). | O teto equivale a cerca de US$ 20/mês (câmbio de ~R$ 5,0). Em us-east-2 (DEC-26), depois dos benefícios gratuitos, t4g.micro custa ~US$ 13/mês e t4g.small ~US$ 19/mês (no limite), incluindo IPv4, disco e S3. Confirmação no CP-3 (DEC-23; doc 03 §10). |
 
 ---
 
@@ -511,7 +511,7 @@ O MVP é aceito quando **todos** os critérios abaixo forem atendidos, **indepen
 | R-15 | Viés de confirmação do pesquisador. | Pesquisa | Alto | Pré-registro de critérios; registro de experimentos descartados. |
 | R-16 | Exposição regulatória em um uso comercial futuro. | Regulatório | Médio | Uso comercial fora do escopo; análise antes de qualquer oferta (RS-07). |
 | R-17 | Créditos AWS acabam ou expiram antes do previsto, ou o custo depois dos créditos passa do teto. | Financeiro / infraestrutura | Médio | Estimativas por fase e cenário (doc 03 §10); checkpoints CP-1 e CP-3; alertas do Budgets e do plano gratuito; tags de projeto. |
-| R-18 | Bloqueio geográfico da Binance para a região AWS escolhida. | Externo | Alto | Região fora de jurisdições restritas (PR-12); teste de conectividade antes de provisionar a coleta. |
+| R-18 | A Binance passar a bloquear também os endpoints `*.binance.vision` a partir dos EUA (os principais já são bloqueados — PR-12). | Externo | Alto | Coleta só pelos endpoints de dados de mercado; alarmes de silêncio e sinal de vida; plano B documentado: recursos avançados + Tóquio (DEC-26), com a região como variável do Terraform. |
 | R-19 | Fim do plano gratuito (12/04/2027) sem passagem ao plano pago: a conta fecha e, após 90 dias, recursos e dados são apagados — inclusive o histórico insubstituível do livro. | Infraestrutura | Alto | Checkpoint CP-2 até 15/03/2027 (doc 03 §10.4); cópia mensal offline dos dados brutos. |
 | R-20 | Recursos criados na conta errada (o perfil padrão do AWS CLI aponta para outra conta, sem créditos). | Infraestrutura / financeiro | Médio | Perfil dedicado; `allowed_account_ids` no Terraform; revisão do `plan` (doc 03 ADR-09). |
 
@@ -556,12 +556,14 @@ O MVP é aceito quando **todos** os critérios abaixo forem atendidos, **indepen
 | DEC-18 | Livro de ofertas | Parcial top 20 a cada 100 ms (normalizado) + stream diferencial a cada 100 ms só na camada bruta, com snapshots REST completos periódicos. Reconstrução do livro completo continua Could (F-04). |
 | DEC-19 | Negócios | Só o stream `trade` ao vivo; `aggTrades` importados dos arquivos públicos quando necessário. |
 | DEC-20 | Armazenamento de dados de mercado | Arquivos, sem servidor de banco: bruta em JSONL + zstd por stream e hora; normalizada em Parquet por dataset e dia; leitura com DuckDB, Polars ou pandas. |
-| DEC-21 | Região AWS | Tóquio (`ap-northeast-1`); Frankfurt como alternativa se a conectividade falhar. |
+| DEC-21 | Região AWS | Tóquio (`ap-northeast-1`); Frankfurt como alternativa se a conectividade falhar. **Substituída por DEC-26.** |
 | DEC-22 | Infraestrutura como código | Terraform. |
-| DEC-23 | Plano depois dos créditos | t4g.micro sob demanda (~US$ 15/mês), dentro do teto de R$ 100 (DEC-16). O CP-3 confirma com consumo medido e avalia se a V0.3 exige t4g.small. |
+| DEC-23 | Plano depois dos créditos | t4g.micro sob demanda (~US$ 13/mês em us-east-2), dentro do teto de R$ 100 (DEC-16). O CP-3 confirma com consumo medido e avalia se a V0.3 exige t4g.small. |
 | DEC-24 | Arquitetura | ADR-01 a ADR-12 do doc 03 aprovadas, incluindo alertas por e-mail via SNS (ADR-12). |
+| DEC-25 | Nome do projeto | **MERIS — Market Evidence & Research Intelligence System**. O pacote Python continua `trader` por enquanto. |
+| DEC-26 | Região AWS | **Ohio (`us-east-2`)**. A conta do projeto (nova experiência da AWS) só aceita essa região, por SCP da organização gerenciada pela AWS. A coleta usa só os endpoints `*.binance.vision`, que respondem dos EUA. Tóquio exigiria passar ao plano pago e ativar os recursos avançados (irreversível) e fica como plano B. Substitui DEC-21. |
 
-Permanecem **em aberto**: o nome do projeto (PD-01) e as pendências de §17.2.
+Permanecem **em aberto**: as pendências de §17.2.
 
 ### 17.2 Decisões pendentes
 
@@ -569,7 +571,6 @@ Permanecem **em aberto**: o nome do projeto (PD-01) e as pendências de §17.2.
 
 | ID | Questão | Opções | Recomendação | Resolver em | Bloqueia |
 |---|---|---|---|---|---|
-| PD-01 | Nome do projeto. | — | — | Qualquer momento | Nada |
 | PD-07 | Critérios quantitativos de G2 e G3. | — | Pré-registrar nos docs 04 e 07, antes de avaliar o holdout. Valores iniciais em §13.3. | Docs 04 e 07 | G2 |
 | PD-08 | Papel da testnet. | (a) paper trading pela testnet; (b) simulador local sobre dados reais. | **(b)** para medir desempenho; testnet apenas para validar integração (PR-02). | Doc 05 | Doc 05 |
 | PD-09 | A V0.3 depende do resultado da V0.2? | — | A construção do motor não depende; a promoção de um modelo para paper trading depende de G2 (§8.3). | Este PRD | Doc 08 |
@@ -589,6 +590,7 @@ Permanecem **em aberto**: o nome do projeto (PD-01) e as pendências de §17.2.
 | PD-04 | 23/10/2026 | DEC-21 — Tóquio; instância e rede no doc 03 §7. |
 | PD-12 | 23/10/2026 | DEC-24 — ADR-01 a ADR-11 do doc 03. |
 | PD-13 | 23/10/2026 | DEC-24 — e-mail via SNS (ADR-12). |
+| PD-01 | 23/10/2026 | DEC-25 — MERIS. |
 
 ---
 
@@ -608,7 +610,7 @@ Permanecem **em aberto**: o nome do projeto (PD-01) e as pendências de §17.2.
 ## 19. Próximos passos
 
 1. **Créditos AWS:** plano gratuito até 12/04/2027 e saldo de US$ 180 confirmados. Falta confirmar a validade dos créditos e o id da conta nova antes do primeiro `terraform apply` (doc 03 §14).
-2. **Revisar e aprovar o PRD** (versão 1.0). PD-01 (nome) pode ficar para depois.
+2. **Revisar e aprovar o PRD** (versão 1.0).
 3. **[PROPOSTA] Ordem dos próximos documentos.** Como o histórico do livro de ofertas não pode ser recuperado retroativamente (PR-04, R-05), sugere-se priorizar o que destrava a coleta, sem abandonar o princípio de documentar antes de implementar:
    1. **02 — SRS**, com foco inicial nos requisitos da V0.1 — rascunho pronto;
    2. **06 — Data & Integrations** — rascunho pronto (DEC-18 a DEC-20);
@@ -628,6 +630,8 @@ Permanecem **em aberto**: o nome do projeto (PD-01) e as pendências de §17.2.
 | 0.4 | 23/10/2026 | DEC-18, DEC-19 e DEC-20 (doc 06) resolvem PD-06, PD-14 e parte de PD-12; F-03 atualizada; PR-01 e PR-10 revistas com medições; RS-01 com volume medido. |
 | 0.5 | 23/10/2026 | DEC-21 a DEC-23 (doc 03); PD-04 resolvida; PR-09 e PR-11 corrigidas (conta nova no plano gratuito; conta do CLI é outra); RS-09 com preços reais; R-17 revisto; R-19 e R-20 acrescentados. |
 | 0.6 | 23/10/2026 | Teto pós-créditos revisto para R$ 100/mês (DEC-16, RS-09); DEC-23 reescrita (t4g.micro após os créditos); DEC-24 aprova ADR-01 a ADR-12 e resolve PD-12 e PD-13. |
+| 0.7 | 23/10/2026 | DEC-25: nome do projeto MERIS — Market Evidence & Research Intelligence System; PD-01 resolvida. |
+| 0.8 | 23/10/2026 | DEC-26: região us-east-2 (substitui DEC-21), após descobrir que a conta só aceita essa região e medir o acesso à Binance a partir dela; PR-12, R-18, RS-09 e DEC-23 revistos. |
 
 ---
 

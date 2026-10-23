@@ -1,0 +1,218 @@
+#!/bin/bash
+# Inicialização do host de coleta (doc 03 §9.3). Roda uma vez, no primeiro boot.
+# O coletor NÃO é iniciado aqui: primeiro `trader smoke`, depois `trader-deploy <versão> --start`.
+set -euo pipefail
+exec > >(tee -a /var/log/trader-bootstrap.log) 2>&1
+
+dnf install -y amazon-cloudwatch-agent python3-pip logrotate
+pip3 install "uv==${uv_version}"
+
+id trader >/dev/null 2>&1 || useradd --system --home-dir /var/lib/trader --shell /sbin/nologin trader
+install -d -o trader -g trader -m 0750 /var/lib/trader
+install -d -o trader -g trader -m 0755 /var/log/trader
+install -d -m 0755 /opt/trader /opt/trader/releases /opt/trader/python /etc/trader
+install -d -m 0700 /var/cache/trader-uv
+
+# Swap de 1 GB como reserva para picos do pipeline (doc 03 §7.3).
+if [ ! -f /swapfile ]; then
+  fallocate -l 1G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  swapon /swapfile
+fi
+
+cat > /etc/trader/trader.toml <<'EOF'
+[collector]
+data_dir = "/var/lib/trader"
+statsd_host = "127.0.0.1"
+statsd_port = 8125
+# Nos EUA, stream.binance.com e api.binance.com respondem HTTP 451; os endpoints só de
+# dados de mercado (*.binance.vision) respondem (doc 06 MD-16 a MD-20).
+ws_base_urls = ["wss://data-stream.binance.vision"]
+rest_base_url = "https://data-api.binance.vision"
+
+[pipeline]
+replica_s3_bucket = "${bucket}"
+aws_region = "${region}"
+EOF
+
+# ------------------------------------------------------------------ agente do CloudWatch
+cat > /opt/aws/amazon-cloudwatch-agent/etc/trader.json <<'EOF'
+{
+  "agent": { "metrics_collection_interval": 60, "run_as_user": "cwagent" },
+  "metrics": {
+    "namespace": "${namespace}",
+    "append_dimensions": { "InstanceId": "$${aws:InstanceId}" },
+    "metrics_collected": {
+      "statsd": {
+        "service_address": "127.0.0.1:8125",
+        "metrics_collection_interval": 60,
+        "metrics_aggregation_interval": 60
+      },
+      "mem": { "measurement": ["mem_used_percent"] },
+      "disk": { "measurement": ["used_percent"], "resources": ["/"], "drop_device": true }
+    }
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/trader/collector-*.log",
+            "log_group_name": "${collector_log_group}",
+            "log_stream_name": "{instance_id}-collector"
+          },
+          {
+            "file_path": "/var/log/trader/pipeline.log",
+            "log_group_name": "${pipeline_log_group}",
+            "log_stream_name": "{instance_id}-pipeline"
+          }
+        ]
+      }
+    }
+  }
+}
+EOF
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/trader.json
+
+# ------------------------------------------------------------------ serviços
+cat > /etc/systemd/system/trader-collector@.service <<'EOF'
+[Unit]
+Description=Coletor da Binance (instancia %i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=trader
+Group=trader
+WorkingDirectory=/var/lib/trader
+ExecStart=/opt/trader/current/bin/trader collect --config /etc/trader/trader.toml --instance %i
+Restart=always
+RestartSec=5
+OOMScoreAdjust=-500
+StandardOutput=append:/var/log/trader/collector-%i.log
+StandardError=append:/var/log/trader/collector-%i.log
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/trader /var/log/trader
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/trader-pipeline.service <<'EOF'
+[Unit]
+Description=Pipeline horario (doc 03 secao 6.3)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=trader
+Group=trader
+WorkingDirectory=/var/lib/trader
+Environment=HOME=/var/lib/trader
+ExecStart=/opt/trader/current/bin/trader pipeline --config /etc/trader/trader.toml
+MemoryMax=700M
+OOMScoreAdjust=500
+StandardOutput=append:/var/log/trader/pipeline.log
+StandardError=append:/var/log/trader/pipeline.log
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/trader /var/log/trader
+EOF
+
+cat > /etc/systemd/system/trader-pipeline.timer <<'EOF'
+[Unit]
+Description=Pipeline horario as HH:05 UTC
+
+[Timer]
+OnCalendar=*-*-* *:05:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+cat > /etc/logrotate.d/trader <<'EOF'
+/var/log/trader/*.log {
+  daily
+  rotate 7
+  compress
+  missingok
+  notifempty
+  copytruncate
+}
+EOF
+
+# ------------------------------------------------------------------ implantação (doc 03 §9)
+cat > /usr/local/bin/trader-deploy <<'EOF'
+#!/bin/bash
+# Uso: trader-deploy <versão> [--start]
+# Instala a versão publicada em s3://<bucket>/artifacts/<versão>/ e, se um coletor já estiver
+# rodando (ou com --start), troca de instância sem lacuna: sobe a nova cor, espera receber
+# todos os canais e só então para a antiga (doc 03 §9.2).
+set -euo pipefail
+VERSION="$1"
+START="$${2:-}"
+BUCKET="${bucket}"
+REGION="${region}"
+export UV_PYTHON_INSTALL_DIR=/opt/trader/python UV_CACHE_DIR=/var/cache/trader-uv
+
+TARGET="/opt/trader/releases/$VERSION"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+aws s3 cp --region "$REGION" --recursive "s3://$BUCKET/artifacts/$VERSION/" "$WORK/"
+(cd "$WORK" && sha256sum -c SHA256SUMS)
+rm -rf "$TARGET"
+uv venv --python 3.12 "$TARGET"
+uv pip install --python "$TARGET/bin/python" --require-hashes -r "$WORK/requirements.txt"
+uv pip install --python "$TARGET/bin/python" --no-deps "$WORK"/*.whl
+ln -sfn "$TARGET" /opt/trader/current.new
+mv -T /opt/trader/current.new /opt/trader/current
+echo "versão $VERSION instalada em $TARGET"
+
+if systemctl is-active --quiet trader-collector@a; then OLD=a; NEW=b
+elif systemctl is-active --quiet trader-collector@b; then OLD=b; NEW=a
+else OLD=""; NEW=a
+fi
+if [ -z "$OLD" ] && [ "$START" != "--start" ]; then
+  echo "nenhum coletor ativo; use --start para iniciar"
+  exit 0
+fi
+
+systemctl start "trader-collector@$NEW"
+HEALTH="/var/lib/trader/health/collector-$NEW.json"
+for _ in $(seq 1 120); do
+  if /opt/trader/current/bin/python - "$HEALTH" <<'PY'
+import json, sys
+try:
+    channels = json.load(open(sys.argv[1]))["channels"]
+except Exception:
+    sys.exit(1)
+sys.exit(0 if channels and all(c["messages"] > 0 for c in channels.values()) else 1)
+PY
+  then
+    if [ -n "$OLD" ]; then
+      systemctl stop "trader-collector@$OLD"
+      systemctl disable "trader-collector@$OLD"
+    fi
+    systemctl enable "trader-collector@$NEW"
+    echo "coletor $NEW ativo com a versão $VERSION"
+    exit 0
+  fi
+  sleep 1
+done
+systemctl stop "trader-collector@$NEW"
+echo "coletor $NEW não recebeu todos os canais em 120 s; versão anterior mantida" >&2
+exit 1
+EOF
+chmod 0755 /usr/local/bin/trader-deploy
+
+systemctl daemon-reload
+echo "bootstrap concluído"

@@ -1,4 +1,4 @@
-"""Linha de comando: `trader collect`, `trader status` e `trader pipeline` (RF-181 a RF-185)."""
+"""Linha de comando: `collect`, `status`, `pipeline` e `smoke` (RF-181 a RF-185)."""
 
 import argparse
 import asyncio
@@ -8,6 +8,7 @@ import time
 from collections.abc import Sequence
 from importlib.metadata import version
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -21,15 +22,16 @@ from trader.ops.config import (
     load_config,
     load_pipeline_config,
 )
-from trader.ops.health import health_path, read_health
+from trader.ops.health import health_files, read_health
 from trader.ops.logs import configure_logging
 from trader.ops.metrics import Metrics, NullMetrics, StatsdMetrics
+from trader.ops.smoke import run_smoke
 from trader.ops.state import StateStore
 from trader.pipeline.hourly import HourlyPipeline, PipelineBusy
 from trader.sources.binance_rest import BinanceRest, WeightLimiter
 from trader.sources.binance_ws import websockets_connector
 from trader.storage.layout import HOUR_US
-from trader.storage.objectstore import LocalDirectoryStore
+from trader.storage.objectstore import LocalDirectoryStore, ObjectStore, S3ObjectStore
 
 STALE_HEALTH_S = 30
 
@@ -41,6 +43,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     collect = commands.add_parser("collect", help="executa o coletor contínuo")
     collect.add_argument("--config", type=Path, help="arquivo TOML com a tabela [collector]")
     collect.add_argument("--data-dir", type=Path, help="diretório de dados (padrão: ./data)")
+    collect.add_argument("--instance", help="nome da instância (troca sem lacuna: a, b)")
     collect.add_argument("--duration", type=float, help="para após N segundos (testes locais)")
     collect.add_argument("--log-level", default="INFO")
 
@@ -57,6 +60,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     pipeline.add_argument("--log-level", default="INFO")
 
+    smoke = commands.add_parser("smoke", help="testa a conectividade com a Binance (doc 03 §9.4)")
+    smoke.add_argument("--config", type=Path)
+    smoke.add_argument("--duration", type=float, default=600.0, help="segundos de WebSocket")
+
     args = parser.parse_args(argv)
     try:
         if args.command == "pipeline":
@@ -64,7 +71,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.config, data_dir=args.data_dir, replica_dir=args.replica_dir
             )
         else:
-            config = load_config(args.config, data_dir=args.data_dir)
+            config = load_config(
+                args.config,
+                data_dir=getattr(args, "data_dir", None),
+                instance=getattr(args, "instance", None),
+            )
     except ConfigError as exc:
         print(f"configuração inválida: {exc}", file=sys.stderr)
         return 2
@@ -75,6 +86,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         configure_logging(args.log_level)
         asyncio.run(run_collector(config, args.duration))
         return 0
+    if args.command == "smoke":
+        return asyncio.run(smoke_test(config, args.duration))
     return show_status(config)
 
 
@@ -88,11 +101,7 @@ async def run_collector(config: CollectorConfig, duration_s: float | None = None
 
     clock = SystemClock()
     state = StateStore(config.data_dir / "state.db")
-    metrics: Metrics = (
-        StatsdMetrics(config.statsd_host, config.statsd_port)
-        if config.statsd_host
-        else NullMetrics()
-    )
+    metrics = _metrics(config.statsd_host, config.statsd_port)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             rest = BinanceRest(
@@ -118,14 +127,29 @@ async def run_collector(config: CollectorConfig, duration_s: float | None = None
 
 
 def show_status(config: CollectorConfig) -> int:
-    health = read_health(health_path(config.data_dir))
-    if health is None:
-        print(f"sem arquivo de saúde em {health_path(config.data_dir)}")
+    paths = health_files(config.data_dir)
+    if not paths:
+        print(f"sem arquivo de saúde em {config.data_dir / 'health'}")
         return 1
     now_us = time.time_ns() // 1000
+    healthy = False
+    for path in paths:
+        health = read_health(path)
+        if health is None:
+            print(f"{path.name}: ilegível")
+            continue
+        healthy |= _print_health(health, now_us)
+    _print_recent_gaps(config.data_dir / "state.db", now_us)
+    return 0 if healthy else 1
+
+
+def _print_health(health: dict[str, Any], now_us: int) -> bool:
     age_s = (now_us - int(health["updated_ts_us"])) / 1e6
-    running = health["status"] == "running" and age_s <= STALE_HEALTH_S
-    print(f"coletor: {health['status']} (atualizado há {age_s:.0f} s) — versão {health['version']}")
+    instance = health.get("instance", "main")
+    print(
+        f"coletor [{instance}]: {health['status']} (atualizado há {age_s:.0f} s)"
+        f" — versão {health['version']}"
+    )
     print(f"sessão primária: {health['primary_session']} ({health['primary_endpoint']})")
     print(f"{'canal':<26}{'mensagens':>12}{'última':>12}")
     for stream, info in health["channels"].items():
@@ -138,31 +162,30 @@ def show_status(config: CollectorConfig) -> int:
         f"lacunas: {health['gaps_detected']} · reconexões: {health['reconnects']} · "
         f"mensagens inválidas: {health['malformed_messages']} · offset de relógio: {offset_text}"
     )
-    state_path = config.data_dir / "state.db"
-    recent = []
-    if state_path.exists():
-        with StateStore(state_path) as state:
-            recent = state.gaps_since(now_us - 24 * 3600 * 1_000_000)
-    if recent:
-        print("lacunas nas últimas 24 h:")
-        for gap in recent[-10:]:
-            record = gap.record
-            ids = (
-                f" ids {record.first_missing_id}-{record.last_missing_id}"
-                if record.first_missing_id is not None
-                else ""
-            )
-            duration = (record.end_ts_us - record.start_ts_us) / 1e6
-            print(f"  {record.channel} {record.cause} {duration:.1f} s{ids} [{gap.status}]")
-    return 0 if running else 1
+    return bool(health["status"] == "running" and age_s <= STALE_HEALTH_S)
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def _print_recent_gaps(state_path: Path, now_us: int) -> None:
+    if not state_path.exists():
+        return
+    with StateStore(state_path) as state:
+        recent = state.gaps_since(now_us - 24 * 3600 * 1_000_000)
+    if not recent:
+        return
+    print("lacunas nas últimas 24 h:")
+    for gap in recent[-10:]:
+        record = gap.record
+        ids = (
+            f" ids {record.first_missing_id}-{record.last_missing_id}"
+            if record.first_missing_id is not None
+            else ""
+        )
+        duration = (record.end_ts_us - record.start_ts_us) / 1e6
+        print(f"  {record.channel} {record.cause} {duration:.1f} s{ids} [{gap.status}]")
 
 
 def run_pipeline(config: PipelineConfig, *, rebuild: bool = False) -> int:
-    store = LocalDirectoryStore(config.replica_dir) if config.replica_dir else None
+    store = _object_store(config)
     with StateStore(config.data_dir / "state.db") as state:
         try:
             report = HourlyPipeline(config, state, store).run(
@@ -171,6 +194,10 @@ def run_pipeline(config: PipelineConfig, *, rebuild: bool = False) -> int:
         except PipelineBusy as exc:
             print(str(exc), file=sys.stderr)
             return 3
+    if report.replication_lag_minutes is not None:
+        metrics = _metrics(config.statsd_host, config.statsd_port)
+        metrics.gauge("ReplicationLagMinutes", report.replication_lag_minutes)
+        metrics.close()
     hours = ", ".join(_hour_label(h) for h in report.normalized_hours) or "nenhuma"
     print(f"órfãos fechados: {report.sealed_orphans} · comprimidos: {report.compressed}")
     print(f"horas normalizadas: {hours}")
@@ -184,5 +211,32 @@ def run_pipeline(config: PipelineConfig, *, rebuild: bool = False) -> int:
     return 0
 
 
+async def smoke_test(config: CollectorConfig, duration_s: float) -> int:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        report = await run_smoke(config, websockets_connector, duration_s, client)
+    print("\n".join(report.lines))
+    print("resultado:", "OK" if report.ok else f"{len(report.problems)} problema(s)")
+    return 0 if report.ok else 1
+
+
+def _object_store(config: PipelineConfig) -> ObjectStore | None:
+    if config.replica_s3_bucket:
+        import boto3  # só o pipeline usa o SDK da AWS (ADR-03)
+
+        client = boto3.session.Session(region_name=config.aws_region).client("s3")
+        return S3ObjectStore(client, config.replica_s3_bucket)
+    if config.replica_dir:
+        return LocalDirectoryStore(config.replica_dir)
+    return None
+
+
+def _metrics(host: str | None, port: int) -> Metrics:
+    return StatsdMetrics(host, port) if host else NullMetrics()
+
+
 def _hour_label(hour: int) -> str:
     return time.strftime("%Y-%m-%d %H:00 UTC", time.gmtime(hour * HOUR_US / 1e6))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
