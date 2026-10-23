@@ -1,0 +1,21 @@
+# Projeto de trading algorítmico com IA (nome a definir)
+
+Sistema de pesquisa e execução algorítmica para BTC/USDT na Binance. Fase atual: **documentação** — índice e status em [docs/README.md](docs/README.md); escopo e decisões em [docs/01-prd.md](docs/01-prd.md).
+
+## Regras de trabalho
+
+- Documentação antes do código: não implementar nada sem o documento correspondente aprovado pelo usuário.
+- Escrever em português (pt-BR); nomes de componentes em inglês.
+- Não presumir lucratividade nem prometer retornos. Resultado negativo é resultado válido.
+- Diferenciar fatos, hipóteses, propostas e pendências (etiquetas do PRD §0.1).
+- Não fixar decisões em aberto (PRD §17.2) sem apresentar opções e trade-offs ao usuário.
+- MVP: long/flat no spot, intraday em minutos, sem capital real, sem alavancagem, sem chaves de API de conta real.
+- AWS: não criar recursos sem estimativa de custo aprovada pelo usuário (créditos de US$ 180; depois, teto de R$ 100/mês).
+- Conta AWS: usar somente a conta nova (plano gratuito, com os créditos), região Tóquio. O perfil padrão do AWS CLI aponta para outra conta (724772086347) — nunca criar recursos nela. Ver docs/03-architecture.md §7.1.
+- Risk Manager determinístico e independente do modelo; o modelo nunca acessa a execução diretamente.
+- Features apenas com informação disponível no instante da decisão (point-in-time); mesmo código em pesquisa e operação.
+- Evitar complexidade prematura (microservices, Kubernetes, filas distribuídas).
+
+## Ambiente
+
+MacBook Air M2, 16 GB RAM, 256 GB, macOS ARM64. Dependências precisam suportar ARM64; armazenamento é limitado.
