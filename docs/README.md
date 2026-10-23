@@ -14,6 +14,13 @@ Fase atual: **V0.1 (Data Engine) em implementação**, coberta pelos docs 02, 03
 | 07 | Testing & Validation Plan | Não iniciado |
 | 08 | Roadmap & Milestones | Não iniciado |
 
+## Guias de apoio (não normativos)
+
+| Guia | Para que serve |
+|---|---|
+| [Mapa do projeto](guias/mapa-do-projeto.md) | Visão de uma página: onde estamos, mapa do código e dos docs, o que é decisão sua |
+| [Guia de ML para o MERIS](guias/ml-para-o-projeto.md) | Mínimo de ML para julgar os resultados da V0.2: vocabulário, erros que invalidam tudo, o que estudar |
+
 ## Convenções
 
 - Idioma: português (pt-BR). Nomes de componentes em inglês (Market Data Engine, Risk Manager, Execution Engine…).
