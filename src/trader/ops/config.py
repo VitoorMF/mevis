@@ -41,6 +41,8 @@ class CollectorConfig:
     snapshot_limit: int = 5000
     snapshot_min_interval_s: float = 10.0
     clock_probe_interval_s: float = 300.0
+    clock_probe_samples: int = 5
+    """Pedidos por medição de offset; vale o de menor ida e volta (doc 06 §4.2)."""
     clock_offset_alert_ms: float = 250.0
     flush_interval_s: float = 1.0
     health_interval_s: float = 5.0
@@ -79,6 +81,8 @@ class CollectorConfig:
             raise ConfigError("rest_weight_budget_per_min deve estar entre 1 e 6000 (MD-08)")
         if not 1 <= self.snapshot_limit <= 5000:
             raise ConfigError("snapshot_limit deve estar entre 1 e 5000")
+        if not 1 <= self.clock_probe_samples <= 10:
+            raise ConfigError("clock_probe_samples deve estar entre 1 e 10")
         if self.backoff_initial_s > self.backoff_max_s:
             raise ConfigError("backoff_initial_s maior que backoff_max_s")
         if not self.instance.replace("-", "").isalnum():

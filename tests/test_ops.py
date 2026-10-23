@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from trader.ingest.clockprobe import measure_offset
+from trader.ingest.clockprobe import best_sample, measure_offset
 from trader.ops.config import CollectorConfig, ConfigError, load_config
 from trader.ops.health import read_health, write_health
 from trader.ops.ids import new_session_id
@@ -62,6 +62,7 @@ class TestConfig:
             {"snapshot_limit": 6000},
             {"silence_limits_s": {"trade": 1.0}},
             {"backoff_initial_s": 100.0},
+            {"clock_probe_samples": 0},
         ],
     )
     def test_invalid_values(self, changes: dict[str, object]) -> None:
@@ -107,6 +108,24 @@ def test_measure_offset() -> None:
     assert offset.rtt_us == 600_000
     assert offset.local_ts_us == 1_792_779_000_300_000
     assert offset.offset_us == 480_000
+
+
+def test_best_sample_is_the_shortest_round_trip() -> None:
+    """A primeira amostra, com abertura de conexão, tem ida e volta longa e offset deslocado."""
+
+    def sample(sent: int, rtt: int, server: int) -> RestResponse:
+        body = json.dumps({"serverTime": server}).encode()
+        return RestResponse("rest:time", sent, sent + rtt, 200, body)
+
+    t0 = 1_792_779_000_000_000
+    samples = [
+        measure_offset(sample(t0, 563_000, t0 + 492_000)),  # handshake: offset +210 ms
+        measure_offset(sample(t0 + 600_000, 141_000, t0 + 670_000)),
+        measure_offset(sample(t0 + 800_000, 139_000, t0 + 868_000)),
+    ]
+    best = best_sample(samples)
+    assert best.rtt_us == 139_000
+    assert best.offset_us == -1_500
 
 
 def test_health_round_trip(tmp_path: Path) -> None:

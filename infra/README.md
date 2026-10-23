@@ -50,9 +50,9 @@ Nenhum `apply` sem revisar o `plan` (RN-012).
 6. **Iniciar a coleta**: `sudo trader-deploy <versão> --start` e conferir com
    `sudo -u trader /opt/trader/current/bin/trader status --config /etc/trader/trader.toml`.
 7. **Ligar o pipeline**: `sudo systemctl enable --now trader-pipeline.timer`.
-8. **Conferir as dimensões das métricas** [A VERIFICAR]:
+8. **Conferir as dimensões das métricas**:
    `aws cloudwatch list-metrics --namespace Trader --profile trader --region us-east-2`.
-   Os alarmes esperam `InstanceId` + `metric_type=gauge` nas métricas StatsD e `InstanceId`, `path=/`, `fstype=xfs` no disco. Se forem outras, ajustar `statsd_dimensions` em `modules/collector_host/main.tf`.
+   Os alarmes esperam `InstanceId` + `metric_type=gauge` nas métricas StatsD e `InstanceId`, `path=/`, `fstype=xfs` no disco. Se forem outras, ajustar `statsd_dimensions` em `modules/collector_host/main.tf`. Conferido em 23/10/2026: as 6 métricas da aplicação, memória e disco chegam com essas dimensões.
 9. **Ligar os alarmes da aplicação**: `app_alarms_enabled = true` no `terraform.tfvars`, `plan` e `apply`.
 10. Início da contagem do CA-01 (7 dias contínuos).
 

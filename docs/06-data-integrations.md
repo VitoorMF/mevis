@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.5 — rascunho |
+| Versão | 0.6 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -100,6 +100,14 @@ Medido no AWS CloudShell da conta do projeto, em 23/10/2026, depois de descobrir
 
 **Consequência (DEC-26):** o host de produção usa só os endpoints `*.binance.vision`, que a própria Binance oferece para dados de mercado; a recuperação imediata de negócios pela REST não está disponível de lá, e as lacunas de negócios são preenchidas pelos arquivos diários.
 
+Medido no host de produção (EC2 t4g.small, us-east-2a), em 23/10/2026:
+
+| ID | Medição | Resultado |
+|---|---|---|
+| MD-22 | `trader smoke` por 10 min: REST `data-api.binance.vision`, 5 pedidos seguidos | Ida e volta mínima de 139 ms; offset de −1,3 ms (incerteza de ±70 ms). |
+| MD-23 | `trader smoke`: WebSocket `data-stream.binance.vision` | Os 4 streams chegam (trade 18,8/s; kline 0,5/s; top 20 e diferencial 10/s); atraso do evento ao recebimento p50 de 69 ms. |
+| MD-24 | Coletor, 1 pedido de horário a cada 5 min | Ida e volta de ~563 ms e offset de ~+210 ms: a conexão HTTP fecha após 5 s parada e cada pedido inclui a abertura da conexão TCP e TLS. Corrigido em §4.2. |
+
 ---
 
 ## 3. Fontes e integrações
@@ -172,7 +180,7 @@ Uma única conexão de streams combinados (`/stream?streams=...&timeUnit=MICROSE
 
 - **Horário de recebimento (`recv_ts_us`):** lido do relógio de parede do host imediatamente após a leitura da mensagem do socket, antes do parsing (RF-121).
 - **Intervalos e silêncio de stream:** medidos com relógio monotônico, imune a ajustes do relógio de parede.
-- **Offset:** medido a cada 5 minutos via `/api/v3/time`, compensando metade do tempo de ida e volta; gravado em `clock_offsets` (RF-125).
+- **Offset:** medido a cada 5 minutos via `/api/v3/time`, compensando metade do tempo de ida e volta; gravado em `clock_offsets` (RF-125). Cada medição é uma rajada de 5 pedidos seguidos na mesma conexão, e vale a amostra de menor ida e volta: o primeiro pedido costuma incluir a abertura da conexão, que infla a ida e volta e desloca o offset (MD-24). A incerteza do offset é metade da ida e volta da amostra escolhida. Todos os pedidos ficam na camada bruta.
 
 ### 4.3 Disponibilidade *point-in-time* (RN-006)
 
@@ -458,10 +466,9 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 
 | Item | Onde se resolve |
 |---|---|
-| Medir volume, compressão e latência a partir da região AWS | Doc 03 / primeira semana da V0.1 |
+| Medir volume e compressão a partir da região AWS (latência: MD-22, MD-23) | Doc 03 / primeira semana da V0.1 |
 | Escolher o endpoint REST principal pela latência medida na região | Primeira semana da V0.1 |
 | Investigar a frequência do parcial top 20 (8,7/s × 10/s nominais; ~10/s na coleta local de 23/10/2026) | V0.1 |
-| Precisão da sonda de relógio: no MacBook, `data-api` teve ida e volta de ~1,2 s, o que deixa o offset com incerteza de ±0,6 s. Preferir o endpoint de menor latência e a amostra de menor ida e volta | Primeira semana na AWS |
 | Tamanho real da camada normalizada | V0.1 |
 | Peso exato de `exchangeInfo` | Implementação |
 | Termos de uso (§12) | Antes da coleta contínua |
@@ -495,3 +502,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.3 | 23/10/2026 | Pendências atualizadas com a primeira coleta local (frequência do top 20; precisão da sonda de relógio). |
 | 0.4 | 23/10/2026 | Regras do pipeline implementado: partição e ordem dos datasets, quarentena por hora, cópia divergente (fica a primeira; minuto `invalid`). |
 | 0.5 | 23/10/2026 | §2.4 com o acesso medido a partir da us-east-2 (MD-16 a MD-21); endpoints e recuperação de negócios ajustados para produção nos EUA (DEC-26); custo de S3 com preço da us-east-2. |
+| 0.6 | 23/10/2026 | Medições no host de produção (MD-22 a MD-24); sonda de relógio em rajada de 5 pedidos, com a amostra de menor ida e volta (§4.2), resolvendo a pendência de precisão. |

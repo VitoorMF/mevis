@@ -1,6 +1,7 @@
 """Offset entre o relógio do host e o da exchange (RF-125; doc 06 §4.2)."""
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from trader.core.timeunits import TimeUnit, to_us
@@ -27,3 +28,11 @@ def measure_offset(response: RestResponse) -> ClockOffset:
         rtt_us=response.recv_ts_us - response.sent_ts_us,
         offset_us=server - midpoint,
     )
+
+
+def best_sample(samples: Sequence[ClockOffset]) -> ClockOffset:
+    """A amostra de menor ida e volta, que tem a menor incerteza (± metade da ida e volta).
+
+    Numa rajada, o primeiro pedido costuma incluir a abertura da conexão TCP e TLS (MD-24).
+    """
+    return min(samples, key=lambda s: s.rtt_us)

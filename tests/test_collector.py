@@ -170,3 +170,27 @@ def test_restart_detects_gap_since_last_run(tmp_path: Path) -> None:
     assert gap.record.first_missing_id is not None and gap.record.last_missing_id is not None
     assert gap.record.last_missing_id - gap.record.first_missing_id + 1 >= 50
     assert len(run.state.sessions()) == 2
+
+
+def test_clock_probe_is_a_burst_with_one_offset_per_round(tmp_path: Path) -> None:
+    """Doc 06 §4.2: cada medição faz vários pedidos, grava todos na bruta e registra um offset."""
+
+    def offsets(run: Run) -> list[tuple[int, int]]:
+        return run.state.clock_offsets_between(0, 2**62)
+
+    async def main() -> Run:
+        async with FakeMarket() as market:
+
+            async def scenario(run: Run) -> None:
+                await run.eventually(lambda: len(offsets(run)) >= 2)
+
+            config = fast_config(
+                tmp_path, market.url, clock_probe_samples=3, clock_probe_interval_s=0.2
+            )
+            return await collect_while(config, FakeRest(), scenario)
+
+    run = asyncio.run(main())
+    rounds = len(offsets(run))
+    calls = run.rest.calls["/api/v3/time"]
+    assert 3 * rounds <= calls < 3 * (rounds + 1)
+    assert len(raw_records(run.raw_dir() / "rest_time")) == calls

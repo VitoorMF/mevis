@@ -22,7 +22,7 @@ from typing import Any
 
 from trader.core.rawformat import RawRecord, is_valid_token
 from trader.core.timeunits import MINUTE_US, SECOND_US, TimeUnit
-from trader.ingest.clockprobe import measure_offset
+from trader.ingest.clockprobe import ClockOffset, best_sample, measure_offset
 from trader.ingest.raw_writer import RawWriter, StorageError
 from trader.normalize.binance import (
     NormalizationError,
@@ -501,28 +501,41 @@ class Collector:
 
     async def _clock_loop(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
-            response = await self._write_rest(self._rest.server_time())
-            if response is not None:
-                try:
-                    offset = measure_offset(response)
-                except (ValueError, KeyError) as exc:
-                    log.warning("resposta de horário inválida", extra=ctx(error=repr(exc)))
-                else:
-                    self._state.record_clock_offset(
-                        offset.local_ts_us, offset.server_ts_us, offset.rtt_us, offset.offset_us
-                    )
-                    self._last_offset_us = offset.offset_us
-                    level = (
-                        logging.WARNING
-                        if abs(offset.offset_us) / 1000 > self._config.clock_offset_alert_ms
-                        else logging.INFO
-                    )
-                    log.log(
-                        level,
-                        "offset de relógio",
-                        extra=ctx(offset_ms=offset.offset_us / 1000, rtt_ms=offset.rtt_us / 1000),
-                    )
+            samples = await self._probe_clock()
+            if samples:
+                offset = best_sample(samples)
+                self._state.record_clock_offset(
+                    offset.local_ts_us, offset.server_ts_us, offset.rtt_us, offset.offset_us
+                )
+                self._last_offset_us = offset.offset_us
+                level = (
+                    logging.WARNING
+                    if abs(offset.offset_us) / 1000 > self._config.clock_offset_alert_ms
+                    else logging.INFO
+                )
+                log.log(
+                    level,
+                    "offset de relógio",
+                    extra=ctx(
+                        offset_ms=offset.offset_us / 1000,
+                        rtt_ms=offset.rtt_us / 1000,
+                        samples=len(samples),
+                    ),
+                )
             await self._sleep(stop, self._config.clock_probe_interval_s)
+
+    async def _probe_clock(self) -> list[ClockOffset]:
+        """Rajada de pedidos seguidos na mesma conexão (doc 06 §4.2); para na primeira falha."""
+        samples = []
+        for _ in range(self._config.clock_probe_samples):
+            response = await self._write_rest(self._rest.server_time())
+            if response is None:
+                break
+            try:
+                samples.append(measure_offset(response))
+            except (ValueError, KeyError) as exc:
+                log.warning("resposta de horário inválida", extra=ctx(error=repr(exc)))
+        return samples
 
     # ------------------------------------------------------------------ rotinas
 

@@ -140,7 +140,7 @@ resource "aws_instance" "collector" {
 
 locals {
   # O agente do CloudWatch publica métricas StatsD com a dimensão metric_type e, por causa de
-  # append_dimensions, com InstanceId [A VERIFICAR na primeira implantação].
+  # append_dimensions, com InstanceId (conferido na primeira implantação, 23/10/2026).
   statsd_dimensions = {
     InstanceId  = aws_instance.collector.id
     metric_type = "gauge"
