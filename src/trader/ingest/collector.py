@@ -32,7 +32,7 @@ from trader.normalize.binance import (
 )
 from trader.ops.clock import Clock
 from trader.ops.config import CollectorConfig
-from trader.ops.health import health_path, write_health
+from trader.ops.health import health_files, health_path, read_health, write_health
 from trader.ops.ids import new_session_id
 from trader.ops.logs import ctx
 from trader.ops.metrics import Metrics
@@ -136,7 +136,12 @@ class Collector:
         self._last_trade_ts_us: int | None = None
         self._last_diff_ts_us: int | None = None
         self._last_top20_recv_us: int | None = None
-        self._load_watermarks()
+        if (other := self._other_active_instance()) is None:
+            self._load_watermarks()
+        else:
+            # Troca sem lacuna (doc 03 §9.2): a outra instância continua gravando, então as marcas
+            # d'água que ela deixou já ficaram para trás e não indicam lacuna.
+            log.info("outra instância ativa; marcas d'água ignoradas", extra=ctx(other=other))
 
         self._rest_session = new_session_id(clock.now_us() // 1000)
         self._rest_seq = 0
@@ -170,7 +175,8 @@ class Collector:
             await asyncio.gather(*background, return_exceptions=True)
             for session in list(self._sessions):
                 await self._close_session(session, "shutdown")
-            self._save_watermarks()
+            if self._other_active_instance() is None:
+                self._save_watermarks()  # senão, as marcas mais novas são as da outra instância
             self._writer.close()
             self._write_health("stopped")
             log.info("coletor parado")
@@ -580,6 +586,24 @@ class Collector:
             self._fatal = exc
 
     # ------------------------------------------------------------------ estado
+
+    def _other_active_instance(self) -> str | None:
+        """Outra instância com saúde `running` atualizada há pouco, ou `None` (doc 03 §9.2)."""
+        limit_us = int(3 * self._config.health_interval_s * SECOND_US)
+        now = self._clock.now_us()
+        for path in health_files(self._config.data_dir):
+            name = path.stem.removeprefix("collector-")
+            health = read_health(path)
+            if name == self._config.instance or health is None:
+                continue
+            updated = health.get("updated_ts_us")
+            if (
+                health.get("status") == "running"
+                and isinstance(updated, int)
+                and now - updated <= limit_us
+            ):
+                return name
+        return None
 
     def _load_watermarks(self) -> None:
         marks = self._state.load_watermarks()

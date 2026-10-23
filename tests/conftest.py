@@ -203,7 +203,7 @@ class Run:
     task: "asyncio.Task[None]"
 
     def health(self) -> dict[str, Any]:
-        return read_health(health_path(self.config.data_dir)) or {}
+        return read_health(health_path(self.config.data_dir, self.config.instance)) or {}
 
     def channel_messages(self) -> dict[str, int]:
         channels = self.health().get("channels", {})

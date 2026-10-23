@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from conftest import STREAMS, FakeMarket, FakeRest, Run, collect_while, fast_config
@@ -194,3 +195,28 @@ def test_clock_probe_is_a_burst_with_one_offset_per_round(tmp_path: Path) -> Non
     calls = run.rest.calls["/api/v3/time"]
     assert 3 * rounds <= calls < 3 * (rounds + 1)
     assert len(raw_records(run.raw_dir() / "rest_time")) == calls
+
+
+def test_new_instance_during_handover_does_not_report_false_gaps(tmp_path: Path) -> None:
+    """Doc 03 §9.2: a cor nova sobe com a antiga ativa; as marcas d'água gravadas pela antiga já
+    ficaram para trás, mas a antiga continua gravando, então não há lacuna real."""
+
+    async def main() -> Run:
+        async with FakeMarket() as market:
+            old_config = fast_config(tmp_path, market.url, instance="a", health_interval_s=0.5)
+            new_config = replace(old_config, instance="b")
+            runs: list[Run] = []
+
+            async def new_scenario(run: Run) -> None:
+                await run.flowing()
+
+            async def old_scenario(run: Run) -> None:
+                await run.flowing()
+                await asyncio.sleep(0.5)  # o mercado avança além das marcas gravadas
+                runs.append(await collect_while(new_config, FakeRest(), new_scenario))
+
+            await collect_while(old_config, FakeRest(), old_scenario)
+            return runs[0]
+
+    run = asyncio.run(main())
+    assert run.gaps() == []

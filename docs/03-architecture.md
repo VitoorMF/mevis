@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.6 — rascunho |
+| Versão | 0.7 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -348,6 +348,8 @@ Unidades modelo `trader-collector@a` e `trader-collector@b`:
 
 Durante a sobreposição, as duas gravam em sessões distintas (doc 06 §3.3), e a deduplicação acontece na normalização. Os demais processos só trocam o link `current`.
 
+A cor nova não compara os primeiros dados com as marcas d'água gravadas no estado se outra instância estiver ativa (saúde `running` atualizada há menos de 3 intervalos de saúde): essas marcas ficam alguns segundos para trás e gerariam lacunas falsas, já que a antiga continua gravando até a troca. Pelo mesmo motivo, a cor antiga não regrava as marcas ao parar se a nova estiver ativa.
+
 ### 9.3 Inicialização do host
 
 O `user data` (cloud-init) instala o `uv` e o agente do CloudWatch (StatsD local, memória, disco e envio dos logs), cria o usuário de serviço, os diretórios e um swap de 1 GB, grava `/etc/trader/trader.toml`, instala as unidades `systemd` (`trader-collector@.service`, `trader-pipeline.service` e `.timer` às HH:05 UTC), o `logrotate` e o `trader-deploy`. **Não** inicia o coletor: isso só acontece depois do teste de fumaça (§9.4).
@@ -493,3 +495,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.4 | 23/10/2026 | §5 inclui o módulo `pipeline`; §6.3 descreve órfãos, elegibilidade, renormalização por resumo das entradas, memória e réplica, como implementados. |
 | 0.5 | 23/10/2026 | Conta 019419901344 confirmada; §7.5 com orçamento bruto e dimensões a verificar; §9 com o fluxo implementado (publish-artifact, trader-deploy, troca a/b, smoke); infraestrutura em `infra/`. |
 | 0.6 | 23/10/2026 | DEC-26: região us-east-2 (a conta só aceita essa região; acesso à Binance medido); custos recalculados com preços da us-east-2; plano B para Tóquio. |
+| 0.7 | 23/10/2026 | §9.2: a cor nova ignora as marcas d'água enquanto a antiga está ativa (lacunas falsas observadas na primeira troca em produção). |
