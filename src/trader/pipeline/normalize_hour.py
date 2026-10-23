@@ -23,8 +23,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import zstandard
-
 from trader.core.rawformat import RawRecord
 from trader.core.timeunits import SECOND_US, TimeUnit, floor_minute
 from trader.normalize.binance import (
@@ -47,6 +45,7 @@ from trader.quality.validation import (
 )
 from trader.storage import parquet
 from trader.storage.layout import HOUR_US, RawFile, dataset_path, quarantine_path
+from trader.storage.quarantine import QuarantineWriter
 from trader.storage.rawfiles import BadLine, iter_records
 
 UNIT = TimeUnit.MICROSECOND
@@ -63,39 +62,6 @@ class HourResult:
     """Arquivos gravados nesta execução (Parquet e quarentena)."""
     removed: list[Path] = field(default_factory=list)
     """Arquivos de uma normalização anterior que deixaram de existir (hora sem registros)."""
-
-
-class _Quarantine:
-    """Linhas JSON comprimidas com zstd; o arquivo só aparece se houver ao menos uma linha."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.count = 0
-        self._tmp = path.with_name(path.name + ".tmp")
-        self._handle: Any = None
-        self._writer: Any = None
-
-    def add(self, entry: Mapping[str, Any]) -> None:
-        if self._writer is None:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._handle = self._tmp.open("wb")
-            self._writer = zstandard.ZstdCompressor(level=9).stream_writer(self._handle)
-        line = json.dumps(entry, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        self._writer.write(line.encode() + b"\n")
-        self.count += 1
-
-    def close(self) -> bool:
-        if self._writer is None:
-            self.path.unlink(missing_ok=True)
-            return False
-        self._writer.close()
-        self._tmp.replace(self.path)
-        return True
-
-    def abort(self) -> None:
-        if self._writer is not None:
-            self._writer.close()
-        self._tmp.unlink(missing_ok=True)
 
 
 class _HourNormalizer:
@@ -135,7 +101,7 @@ class _HourNormalizer:
                 config.books_row_group,
             ),
         }
-        self.quarantine = _Quarantine(quarantine_path(data_dir, symbol, hour))
+        self.quarantine = QuarantineWriter(quarantine_path(data_dir, symbol, hour))
 
     # --------------------------------------------------------------------- entrada
 

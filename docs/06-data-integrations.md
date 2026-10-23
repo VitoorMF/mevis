@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.6 — rascunho |
+| Versão | 0.7 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -351,7 +351,7 @@ A transição para classes de armazenamento mais baratas no S3 (por idade) será
 |---|---|---|---|
 | Bruta comprimida | ~170 MB (pico ~260 MB) | ~5,2 GB | ~62 GB |
 | Normalizada + derivada [ESTIMATIVA, medir na V0.1] | ~80 MB | ~2,4 GB | ~14 GB (6 meses retidos) |
-| Backfill (§7), carga única [ESTIMATIVA] | — | — | ~5 a 10 GB |
+| Backfill (§7), carga única | — | — | ~9 GB de negócios (MD-25) e ~0,1 GB de candles |
 | **Total** | **~250 MB** | **~7,6 GB** | **~85 GB** |
 
 Custo de armazenamento S3 Standard ao fim de 12 meses na us-east-2 (US$ 0,023/GB-mês, DEC-26): cerca de US$ 1,96 por mês (doc 03 §10). Requisições de gravação (dezenas de arquivos por hora) custam centavos por mês. A transferência para o MacBook entra na franquia mensal de saída para a internet [A VERIFICAR].
@@ -360,13 +360,30 @@ Custo de armazenamento S3 Standard ao fim de 12 meses na us-east-2 (US$ 0,023/GB
 
 ## 7. Backfill
 
-| Dataset | Fonte | Período [PROPOSTA] | Observações |
+| Dataset | Fonte | Período (aprovado em 23/10/2026) | Observações |
 |---|---|---|---|
-| `klines_1m` | Arquivos mensais e diários; REST para o dia corrente | Desde 01/01/2023 | ~3 anos para pesquisa de candles (H-01, H-02). |
-| `trades` | Arquivos diários e mensais | Últimos 12 meses | ~3 milhões de linhas por dia; cerca de 5 a 10 GB por ano em Parquet [ESTIMATIVA, medir no primeiro mês importado]. |
-| `agg_trades` | Arquivos | Sob demanda | Could (DEC-19). |
+| `klines_1m` | Arquivos mensais (meses completos) e diários (mês incompleto) | 01/01/2023 a 22/10/2026 | ~3 anos para pesquisa de candles (H-01, H-02). |
+| `trades` | Arquivos diários | 23/10/2025 a 22/10/2026 | ~3,5 milhões de linhas por dia; ~25 MB/dia e ~9 GB por ano em Parquet (MD-25). |
+| `agg_trades` | Arquivos | Sob demanda | Could (DEC-19); não implementado. |
 
-Regras: checksum verificado antes da importação (RF-143); unidade de tempo conforme a data do arquivo (§4.1); importação idempotente por chave (RF-144); `origin = archive`; `recv_ts_us` nulo.
+Os períodos terminam na véspera do início da coleta contínua (23/10/2026, 22:44 UTC). A REST não é usada no backfill: o dia corrente fica com a coleta ao vivo.
+
+**MD-25 — arquivo diário de negócios de 22/10/2026:** 3,46 milhões de linhas; ZIP de 24 MB com um CSV de 263 MB, sem cabeçalho; marcas de tempo em µs. Normalizado pelo código da camada normalizada: ~93 mil linhas/s em um núcleo do MacBook M2 (~37 s por dia) e ~7,1 MB de Parquet por milhão de linhas.
+
+Regras: checksum verificado antes da importação (RF-143); unidade de tempo conforme a data do arquivo (§4.1); importação idempotente (RF-144); `origin = archive`; `recv_ts_us` nulo.
+
+**Funcionamento (`trader backfill`):**
+
+1. **Unidade de trabalho:** um arquivo de `data.binance.vision` com o seu `.CHECKSUM`. Os downloads são feitos um de cada vez; falha de rede, HTTP 5xx ou 429 geram nova tentativa com espera (no 429, a de `Retry-After`). HTTP 404 significa arquivo ainda não publicado: entra no relatório como ausente.
+2. **Checksum:** o SHA-256 é calculado durante o download. Se divergir do publicado, o arquivo é rejeitado, nada é gravado e a próxima execução tenta de novo (RF-143).
+3. **Normalização:** o CSV é lido em fluxo pelo mesmo código de normalização e validação dos dados ao vivo (PP-05).
+4. **Saída:** `normalized/<dataset>/symbol=BTCUSDT/date=AAAA-MM-DD/archive.parquet`, um arquivo por dia, na ordem do arquivo de origem. O arquivo mensal de candles é dividido por dia. `provenance` = `<nome do ZIP>@<SHA-256>`.
+5. **Quarentena:** registros recusados vão para `quarantine/binance-spot/btcusdt/date=…/archive-<dataset>.jsonl.zst`, com o motivo. Também vai para lá a linha cuja data não pertence ao período do arquivo, para não sobrescrever outro dia. Negócio repetido com conteúdo idêntico é descartado; com conteúdo diferente, ou fora da ordem dos ids, fica o primeiro e o outro vai para a quarentena.
+6. **Relatório:** por arquivo, linhas gravadas, quarentena, repetições, ids de negócio ausentes e minutos sem candle, na tabela `backfill_files` do estado, exportada como dataset operacional. Ids ausentes dentro de um arquivo não têm outra fonte no host de produção: ficam registrados, sem preenchimento.
+7. **Retomada (RF-144):** um arquivo só é marcado como importado depois que todas as saídas foram gravadas e replicadas; os já importados são pulados. Um arquivo interrompido é processado de novo desde o início e regrava as mesmas saídas, sem duplicar. Duas execuções simultâneas são impedidas por um bloqueio.
+8. **Réplica:** cada saída vai para o armazenamento durável com o SHA-256 assim que o arquivo de origem termina. Havendo réplica, a cópia local é apagada em seguida, porque o disco do host é pequeno; no S3, os dados de backfill nunca são apagados (§6.2).
+9. **Limite com a coleta ao vivo:** o backfill só cobre dias anteriores ao início da coleta contínua, para não repetir chaves da normalização horária. Do dia em que a coleta começou em diante, os arquivos diários servem à recuperação de lacunas (§9, F-06), que junta os dados recuperados na normalização da hora.
+10. **Máscara de qualidade:** não é gerada para os dias importados nesta versão [PENDÊNCIA]; a cobertura sai do relatório (item 6) e dos próprios dados.
 
 ---
 
@@ -470,6 +487,8 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | Escolher o endpoint REST principal pela latência medida na região | Primeira semana da V0.1 |
 | Investigar a frequência do parcial top 20 (8,7/s × 10/s nominais; ~10/s na coleta local de 23/10/2026) | V0.1 |
 | Tamanho real da camada normalizada | V0.1 |
+| Onde rodar o backfill de negócios: ~4 h de CPU no MacBook M2; no t4g.small, mais lento e limitado pelos créditos de CPU (modo `standard`) | Antes da carga de negócios |
+| Máscara de qualidade para os dias importados pelo backfill (§7) | V0.2, se a pesquisa precisar |
 | Peso exato de `exchangeInfo` | Implementação |
 | Termos de uso (§12) | Antes da coleta contínua |
 | Classes de armazenamento mais baratas no S3 | CP-3 (doc 03 §10.4) |
@@ -503,3 +522,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.4 | 23/10/2026 | Regras do pipeline implementado: partição e ordem dos datasets, quarentena por hora, cópia divergente (fica a primeira; minuto `invalid`). |
 | 0.5 | 23/10/2026 | §2.4 com o acesso medido a partir da us-east-2 (MD-16 a MD-21); endpoints e recuperação de negócios ajustados para produção nos EUA (DEC-26); custo de S3 com preço da us-east-2. |
 | 0.6 | 23/10/2026 | Medições no host de produção (MD-22 a MD-24); sonda de relógio em rajada de 5 pedidos, com a amostra de menor ida e volta (§4.2), resolvendo a pendência de precisão. |
+| 0.7 | 23/10/2026 | §7: períodos aprovados e funcionamento do backfill (saída por dia, quarentena, relatório, retomada, réplica, limite com a coleta ao vivo); MD-25. |

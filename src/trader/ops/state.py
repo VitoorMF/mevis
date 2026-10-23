@@ -1,4 +1,5 @@
-"""Estado operacional em SQLite (ADR-02): sessões, lacunas, offsets de relógio e marcas d'água.
+"""Estado operacional em SQLite (ADR-02): sessões, lacunas, offsets de relógio, marcas d'água
+e arquivos importados pelo backfill.
 
 Exportado para os datasets operacionais pelo pipeline (doc 06 §5.4).
 """
@@ -74,6 +75,21 @@ CREATE TABLE IF NOT EXISTS normalized_hours (
     normalized_ts_us  INTEGER NOT NULL,
     PRIMARY KEY (symbol, hour)
 );
+CREATE TABLE IF NOT EXISTS backfill_files (
+    file_name         TEXT PRIMARY KEY,
+    dataset           TEXT NOT NULL,
+    first_day         TEXT NOT NULL,
+    last_day          TEXT NOT NULL,
+    status            TEXT NOT NULL,
+    sha256            TEXT,
+    rows              INTEGER NOT NULL,
+    quarantined       INTEGER NOT NULL,
+    duplicates        INTEGER NOT NULL,
+    missing_ids       INTEGER NOT NULL,
+    missing_minutes   INTEGER NOT NULL,
+    outputs           TEXT NOT NULL,
+    finished_ts_us    INTEGER NOT NULL
+);
 """
 
 
@@ -106,6 +122,26 @@ class OutputRow:
     written_ts_us: int
     replicated_ts_us: int | None = None
     deleted_ts_us: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BackfillFileRow:
+    """Resultado da importação de um arquivo público (doc 06 §7)."""
+
+    file_name: str
+    dataset: str
+    first_day: str
+    last_day: str
+    status: str
+    """`imported`, `rejected` (checksum) ou `missing` (ainda não publicado)."""
+    sha256: str | None
+    rows: int
+    quarantined: int
+    duplicates: int
+    missing_ids: int
+    missing_minutes: int
+    outputs: tuple[str, ...]
+    finished_ts_us: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,9 +381,35 @@ class StateStore:
             (symbol, hour, digest, ts_us),
         )
 
+    def backfill_status(self, file_name: str) -> str | None:
+        row = self._db.execute(
+            "SELECT status FROM backfill_files WHERE file_name = ?", (file_name,)
+        ).fetchone()
+        return None if row is None else str(row[0])
+
+    def record_backfill_file(self, row: BackfillFileRow) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO backfill_files VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                row.file_name,
+                row.dataset,
+                row.first_day,
+                row.last_day,
+                row.status,
+                row.sha256,
+                row.rows,
+                row.quarantined,
+                row.duplicates,
+                row.missing_ids,
+                row.missing_minutes,
+                json.dumps(list(row.outputs)),
+                row.finished_ts_us,
+            ),
+        )
+
     def table_rows(self, table: str) -> tuple[list[str], list[tuple[object, ...]]]:
         """Colunas e linhas de uma tabela operacional, para exportação (doc 06 §5.4)."""
-        if table not in {"sessions", "gaps", "clock_offsets"}:
+        if table not in {"sessions", "gaps", "clock_offsets", "backfill_files"}:
             raise ValueError(f"tabela não exportável: {table}")
         cursor = self._db.execute(f"SELECT * FROM {table}")
         return [d[0] for d in cursor.description], cursor.fetchall()

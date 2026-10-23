@@ -47,7 +47,7 @@ from trader.storage.objectstore import ObjectStore
 from trader.storage.rawfiles import compress_file, content_digest, file_sha256
 
 log = logging.getLogger(__name__)
-OPS_TABLES = ("sessions", "gaps", "clock_offsets")
+OPS_TABLES = ("sessions", "gaps", "clock_offsets", "backfill_files")
 
 
 class PipelineBusy(RuntimeError):

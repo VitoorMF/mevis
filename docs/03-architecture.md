@@ -158,7 +158,7 @@ trader/
   storage/     layout de caminhos, escrita de Parquet, sincronização S3, retenção
   recovery/    estratégias de recuperação por canal
   pipeline/    rodada horária: órfãos, compressão, normalização por hora, máscara, exportações,
-               réplica e retenção
+               réplica e retenção; backfill dos arquivos públicos (doc 06 §7)
   ops/         configuração, logs estruturados, StatsD, saúde, estado SQLite
   cli/         comandos
 ```
@@ -495,4 +495,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.4 | 23/10/2026 | §5 inclui o módulo `pipeline`; §6.3 descreve órfãos, elegibilidade, renormalização por resumo das entradas, memória e réplica, como implementados. |
 | 0.5 | 23/10/2026 | Conta 019419901344 confirmada; §7.5 com orçamento bruto e dimensões a verificar; §9 com o fluxo implementado (publish-artifact, trader-deploy, troca a/b, smoke); infraestrutura em `infra/`. |
 | 0.6 | 23/10/2026 | DEC-26: região us-east-2 (a conta só aceita essa região; acesso à Binance medido); custos recalculados com preços da us-east-2; plano B para Tóquio. |
-| 0.7 | 23/10/2026 | §9.2: a cor nova ignora as marcas d'água enquanto a antiga está ativa (lacunas falsas observadas na primeira troca em produção). |
+| 0.7 | 23/10/2026 | §9.2: a cor nova ignora as marcas d'água enquanto a antiga está ativa (lacunas falsas observadas na primeira troca em produção); §5: backfill no pacote `pipeline`. |

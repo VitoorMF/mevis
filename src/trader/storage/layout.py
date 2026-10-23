@@ -3,7 +3,7 @@
 import os
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import Enum
 from pathlib import Path
 
@@ -92,6 +92,25 @@ def quarantine_path(data_dir: Path, symbol: str, hour: int) -> Path:
     return (
         data_dir / "quarantine" / EXCHANGE / symbol.lower() / date_dir / hour_dir
     ) / "normalize.jsonl.zst"
+
+
+def archive_dataset_path(data_dir: Path, dataset: str, symbol: str, day: date) -> Path:
+    """Dia importado pelo backfill: `normalized/<dataset>/symbol=X/date=…/archive.parquet`."""
+    return (
+        data_dir
+        / "normalized"
+        / dataset
+        / f"symbol={symbol}"
+        / f"date={day:%Y-%m-%d}"
+        / ("archive.parquet")
+    )
+
+
+def archive_quarantine_path(data_dir: Path, symbol: str, dataset: str, day: date) -> Path:
+    """Registros recusados no backfill de um dia (doc 06 §7)."""
+    return (
+        data_dir / "quarantine" / EXCHANGE / symbol.lower() / f"date={day:%Y-%m-%d}"
+    ) / f"archive-{dataset}.jsonl.zst"
 
 
 def relative(data_dir: Path, path: Path) -> str:
