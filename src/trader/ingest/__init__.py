@@ -1,4 +1,4 @@
-"""Sessão e rotação de conexões, gravador bruto, verificações ao vivo, snapshots, offset.
+"""Coleta ao vivo: sessões, rotação, gravador bruto, verificações, snapshots e offset.
 
-A implementar (doc 03 §5).
+Ver doc 03 §5.
 """

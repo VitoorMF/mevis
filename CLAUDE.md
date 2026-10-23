@@ -1,6 +1,8 @@
 # Projeto de trading algorítmico com IA (nome a definir)
 
-Sistema de pesquisa e execução algorítmica para BTC/USDT na Binance. Fase atual: **documentação** — índice e status em [docs/README.md](docs/README.md); escopo e decisões em [docs/01-prd.md](docs/01-prd.md).
+Sistema de pesquisa e execução algorítmica para BTC/USDT na Binance. Fase atual: **V0.1 (Data Engine) em implementação** — índice e status em [docs/README.md](docs/README.md); escopo e decisões em [docs/01-prd.md](docs/01-prd.md); estrutura do código em docs/03-architecture.md §5.
+
+Comandos: `uv run pytest`, `uv run ruff check .`, `uv run mypy`, `uv run trader collect --data-dir data/<nome> --duration <s>`, `uv run trader status --data-dir data/<nome>`.
 
 ## Regras de trabalho
 

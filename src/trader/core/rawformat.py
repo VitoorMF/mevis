@@ -17,6 +17,11 @@ class RawFormatError(ValueError):
     """Linha ou campo incompatível com o envelope da camada bruta."""
 
 
+def is_valid_token(value: str) -> bool:
+    """Nomes de sessão e de canal aceitos no envelope."""
+    return _TOKEN.fullmatch(value) is not None
+
+
 @dataclass(frozen=True, slots=True)
 class RawRecord:
     recv_ts_us: int
@@ -28,7 +33,7 @@ class RawRecord:
 
 def encode(record: RawRecord) -> bytes:
     for name, value in (("session", record.session), ("channel", record.channel)):
-        if not _TOKEN.fullmatch(value):
+        if not is_valid_token(value):
             raise RawFormatError(f"{name} com caracteres não permitidos: {value!r}")
     if b"\n" in record.payload:
         raise RawFormatError("payload contém quebra de linha")

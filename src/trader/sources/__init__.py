@@ -1,4 +1,4 @@
-"""Adaptadores da Binance: WebSocket, REST com limitador de peso, arquivos públicos.
+"""Adaptadores da Binance: WebSocket, REST com limitador de peso e, futuramente, arquivos públicos.
 
-A implementar (doc 03 §5).
+Únicos módulos que conhecem endpoints e protocolos da exchange (doc 03 §5).
 """

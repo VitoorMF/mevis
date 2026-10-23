@@ -1,4 +1,1 @@
-"""Comandos de linha de comando.
-
-A implementar (doc 03 §5).
-"""
+"""Linha de comando (RF-181)."""

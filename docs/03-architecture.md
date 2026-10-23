@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | Sistema de trading algorítmico com IA — *nome a definir (PD-01)* |
 | Documento | 03 — System Architecture |
-| Versão | 0.2 — rascunho |
+| Versão | 0.3 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-21 a DEC-24 tomadas; ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -135,7 +135,7 @@ Regra de dependência entre módulos (estilo hexagonal): o núcleo (modelos, nor
 | Canal | Produtor → consumidor | Contrato |
 |---|---|---|
 | Arquivos brutos | coletor → pipeline | Arquivo aberto tem sufixo `.open`; ao fechar, é renomeado atomicamente para `.jsonl` (doc 06 §5.2). O pipeline só lê arquivos fechados. |
-| `state.db` (SQLite, WAL) | todos | Estado operacional mutável: sessões, lacunas e seus status, fila de recuperação, controle de replicação. Exportado a cada hora para os datasets operacionais (doc 06 §5.4) e copiado para o S3. |
+| `state.db` (SQLite, WAL) | todos | Estado operacional mutável: sessões, lacunas e seus status, fila de recuperação, controle de replicação e marcas d'água das verificações (permitem detectar lacunas entre execuções do coletor). Exportado a cada hora para os datasets operacionais (doc 06 §5.4) e copiado para o S3. |
 | Arquivos de saúde (`health/`) | coletor → CLI e implantação | JSON reescrito a cada 5 s com a idade da última mensagem por canal e a versão em execução. |
 | StatsD (UDP local) | coletor → agente CloudWatch | Métricas agregadas a cada 60 s (§7.5). |
 
@@ -183,9 +183,12 @@ trader/
 
 ### 6.2 Rotação planejada da conexão (RF-115)
 
-1. Aos 23 h de idade, abre uma nova sessão com os mesmos streams.
-2. Quando todos os canais da nova sessão recebem dados, fecha a sessão antiga.
-3. As duas sessões gravam em arquivos separados durante a sobreposição; a deduplicação acontece na normalização.
+1. Aos 23 h de idade, abre uma nova sessão com os mesmos streams. Enquanto a nova "aquece", tudo o que ela recebe vai para a camada bruta e para um buffer; as verificações ao vivo continuam usando só a sessão antiga.
+2. Quando todos os canais da nova sessão recebem dados, espera um período de sobreposição (2 s) para garantir que a antiga já processou o que a nova tem no buffer.
+3. Reprocessa o buffer nas verificações (as duplicatas da sobreposição são ignoradas pelos rastreadores), promove a nova sessão e fecha a antiga.
+4. As duas sessões gravam em arquivos separados durante a sobreposição; a deduplicação dos dados acontece na normalização.
+
+Se a nova sessão falhar ou não ficar pronta em 60 s, a rotação é adiada em 1 minuto. Se a antiga morrer durante o aquecimento, a nova assume imediatamente.
 
 ### 6.3 Pipeline horário (ADR-04)
 
@@ -471,3 +474,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 |---|---|---|
 | 0.1 | 23/10/2026 | Rascunho inicial: Data Engine e hospedagem AWS; DEC-21 a DEC-23; ADR-01 a ADR-12 propostas. |
 | 0.2 | 23/10/2026 | ADR-01 a ADR-12 aprovadas (DEC-24); teto pós-créditos de R$ 100/mês; DEC-23 e CP-3 reescritos. |
+| 0.3 | 23/10/2026 | §6.2 detalha o buffer e a sobreposição da rotação; §4.2 inclui as marcas d'água no `state.db` (ambos implementados no coletor). |

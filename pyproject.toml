@@ -4,7 +4,13 @@ version = "0.1.0.dev0"
 description = "Sistema de trading algorítmico com IA — V0.1 Data Engine"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "httpx>=0.28.1",
+    "websockets>=17.3",
+]
+
+[project.scripts]
+trader = "trader.cli.main:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -23,6 +29,9 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["trader", "conftest"]
 
 [tool.mypy]
 strict = true

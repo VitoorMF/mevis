@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | Sistema de trading algorítmico com IA — *nome a definir (PD-01)* |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.2 — rascunho |
+| Versão | 0.3 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -443,7 +443,8 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 |---|---|
 | Medir volume, compressão e latência a partir da região AWS | Doc 03 / primeira semana da V0.1 |
 | Escolher o endpoint REST principal pela latência medida na região | Primeira semana da V0.1 |
-| Investigar a frequência do parcial top 20 (8,7/s × 10/s nominais) | V0.1 |
+| Investigar a frequência do parcial top 20 (8,7/s × 10/s nominais; ~10/s na coleta local de 23/10/2026) | V0.1 |
+| Precisão da sonda de relógio: no MacBook, `data-api` teve ida e volta de ~1,2 s, o que deixa o offset com incerteza de ±0,6 s. Preferir o endpoint de menor latência e a amostra de menor ida e volta | Primeira semana na AWS |
 | Tamanho real da camada normalizada | V0.1 |
 | Peso exato de `exchangeInfo` | Implementação |
 | Termos de uso (§12) | Antes da coleta contínua |
@@ -474,3 +475,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 |---|---|---|
 | 0.1 | 23/10/2026 | Rascunho inicial com DEC-18, DEC-19 e DEC-20; medições de referência a partir do MacBook. |
 | 0.2 | 23/10/2026 | Custo de S3 com o preço de Tóquio (DEC-21); pendência de preços movida para o CP-3. |
+| 0.3 | 23/10/2026 | Pendências atualizadas com a primeira coleta local (frequência do top 20; precisão da sonda de relógio). |
