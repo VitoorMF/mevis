@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.7 — rascunho |
+| Versão | 0.8 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -370,6 +370,10 @@ Os períodos terminam na véspera do início da coleta contínua (23/10/2026, 22
 
 **MD-25 — arquivo diário de negócios de 22/10/2026:** 3,46 milhões de linhas; ZIP de 24 MB com um CSV de 263 MB, sem cabeçalho; marcas de tempo em µs. Normalizado pelo código da camada normalizada: ~93 mil linhas/s em um núcleo do MacBook M2 (~37 s por dia) e ~7,1 MB de Parquet por milhão de linhas.
 
+**MD-26 — candles de 01/01/2023 a 22/10/2026, importados no host de produção:** 67 arquivos (45 mensais, 22 diários), 2.002.960 linhas em 1.391 dias, 81 s de CPU com `CPUQuota` de 25% (~25 mil linhas/s por núcleo, ~3,7× mais lento que o M2) e saldo de créditos de CPU subindo durante a carga. Faltam 80 minutos, todos no arquivo de março de 2023 [HIPÓTESE: a parada de negociação de spot da Binance em 24/03/2023].
+
+**Carga de negócios 2025–2026:** rodada no MacBook, com envio direto ao S3 (decisão de 23/10/2026). No host, pela taxa de MD-26 e com o limite de 25% de CPU, levaria ~2 dias. No MacBook, ~1 min por dia de arquivo, contando download e envio. O `boto3` precisa de `botocore[crt]` para usar as credenciais de `aws login`; é dependência só de desenvolvimento e não vai para o host.
+
 Regras: checksum verificado antes da importação (RF-143); unidade de tempo conforme a data do arquivo (§4.1); importação idempotente (RF-144); `origin = archive`; `recv_ts_us` nulo.
 
 **Funcionamento (`trader backfill`):**
@@ -487,7 +491,6 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | Escolher o endpoint REST principal pela latência medida na região | Primeira semana da V0.1 |
 | Investigar a frequência do parcial top 20 (8,7/s × 10/s nominais; ~10/s na coleta local de 23/10/2026) | V0.1 |
 | Tamanho real da camada normalizada | V0.1 |
-| Onde rodar o backfill de negócios: ~4 h de CPU no MacBook M2; no t4g.small, mais lento e limitado pelos créditos de CPU (modo `standard`) | Antes da carga de negócios |
 | Máscara de qualidade para os dias importados pelo backfill (§7) | V0.2, se a pesquisa precisar |
 | Peso exato de `exchangeInfo` | Implementação |
 | Termos de uso (§12) | Antes da coleta contínua |
@@ -523,3 +526,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.5 | 23/10/2026 | §2.4 com o acesso medido a partir da us-east-2 (MD-16 a MD-21); endpoints e recuperação de negócios ajustados para produção nos EUA (DEC-26); custo de S3 com preço da us-east-2. |
 | 0.6 | 23/10/2026 | Medições no host de produção (MD-22 a MD-24); sonda de relógio em rajada de 5 pedidos, com a amostra de menor ida e volta (§4.2), resolvendo a pendência de precisão. |
 | 0.7 | 23/10/2026 | §7: períodos aprovados e funcionamento do backfill (saída por dia, quarentena, relatório, retomada, réplica, limite com a coleta ao vivo); MD-25. |
+| 0.8 | 24/10/2026 | §7: MD-26 (candles importados no host) e carga de negócios no MacBook; pendência de onde rodar resolvida. |
