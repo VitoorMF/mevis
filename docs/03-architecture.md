@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.9 — rascunho |
+| Versão | 0.10 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -105,14 +105,12 @@ Regra de dependência entre módulos (estilo hexagonal): o núcleo (modelos, nor
 ┌──────────────────────────── EC2 t4g (Amazon Linux 2023, ARM64) ─────────────────────────────┐
 │                                                                                              │
 │  trader-collector (serviço, sempre ativo)          trader-pipeline (timer, HH:05 UTC)        │
-│   ├─ cliente WebSocket + rotação de sessão          ├─ comprime e verifica arquivos fechados │
-│   ├─ gravador bruto (fsync a cada 1 s)              ├─ replica no S3                         │
-│   ├─ verificações ao vivo (ids, U/u, silêncio)      ├─ normaliza a hora → Parquet → S3       │
-│   ├─ snapshots REST do livro, offset de relógio     ├─ máscara de qualidade e datasets oper. │
-│   └─ StatsD → agente CloudWatch (métricas, vida)    └─ retenção local (só o já replicado)    │
-│                                                                                              │
-│  trader-recovery (timer, a cada 5 min)             trader-archive (timer, diário 04:00 UTC)  │
-│   └─ lacunas recuperáveis via REST                  └─ recuperação pelos arquivos D+1        │
+│   ├─ cliente WebSocket + rotação de sessão          ├─ recupera lacunas (REST e arquivo D+1) │
+│   ├─ gravador bruto (fsync a cada 1 s)              ├─ comprime e verifica arquivos fechados │
+│   ├─ verificações ao vivo (ids, U/u, silêncio)      ├─ replica no S3                         │
+│   ├─ snapshots REST do livro, offset de relógio     ├─ normaliza a hora → Parquet → S3       │
+│   └─ StatsD → agente CloudWatch (métricas, vida)    ├─ máscara de qualidade e datasets oper. │
+│                                                     └─ retenção local (só o já replicado)    │
 │                                                                                              │
 │  amazon-cloudwatch-agent (métricas StatsD, memória, disco; envio de logs)                    │
 │  amazon-ssm-agent (acesso administrativo)    chronyd (Amazon Time Sync)                      │
@@ -124,9 +122,7 @@ Regra de dependência entre módulos (estilo hexagonal): o núcleo (modelos, nor
 | Processo | Tipo | Responsabilidade | Requisitos |
 |---|---|---|---|
 | `trader-collector` | Serviço `systemd` (`Restart=always`) | Conexão, rotação, gravação bruta, verificações ao vivo, snapshots REST, offset, métricas e sinal de vida. | RF-101–RF-109, RF-111–RF-119, RF-121–RF-125, RF-131, RF-135, RF-161, RF-192–RF-194 |
-| `trader-pipeline` | Timer horário | Compressão, replicação, normalização, máscara de qualidade, exportação de datasets operacionais, retenção local. | RF-126–RF-129, RF-131–RF-139, RF-151–RF-159 |
-| `trader-recovery` | Timer de 5 min | Recuperação de lacunas via REST, dentro do orçamento de peso. | RF-145–RF-149 |
-| `trader-archive` | Timer diário | Recuperação pelos arquivos públicos; backfill agendado. | RF-141–RF-146 |
+| `trader-pipeline` | Timer horário | Recuperação de lacunas (§6.4), compressão, replicação, normalização, máscara de qualidade, exportação de datasets operacionais, retenção local. | RF-126–RF-129, RF-131–RF-139, RF-145–RF-149, RF-151–RF-159 |
 | `trader` (CLI) | Sob demanda | Status, backfill, relatório, reconstrução, replay. | RF-181–RF-185 |
 
 **Coletor enxuto (ADR-03).** O coletor não importa SDK da AWS nem bibliotecas de Parquet. Ele grava bytes e faz verificações leves; métricas e sinal de vida saem por pacotes UDP StatsD para o agente do CloudWatch. Com isso a memória fica baixa (RNF-008), e a instância pode ser reduzida depois (DEC-23).
@@ -199,7 +195,7 @@ Se a nova sessão falhar ou não ficar pronta em 60 s, a rotação é adiada em 
 ### 6.3 Pipeline horário (ADR-04)
 
 ```text
-HH:05 ─► fechar órfãos ─► comprimir e verificar arquivos fechados ─► registrar no state.db
+HH:05 ─► fechar órfãos ─► recuperar lacunas ─► comprimir e verificar arquivos fechados ─► registrar no state.db
          para cada hora cujas entradas mudaram:
            normalizar ─► deduplicar ─► validar ─► Parquet + quarentena ─► máscara de qualidade
          exportar datasets operacionais e cópia do state.db
@@ -217,7 +213,9 @@ HH:05 ─► fechar órfãos ─► comprimir e verificar arquivos fechados ─�
 
 ### 6.4 Recuperação de lacunas
 
-O `trader-recovery` lê as lacunas abertas no `state.db`. Para cada uma, aplica a estratégia do canal (doc 06 §9), respeitando o teto de peso REST, grava as respostas na camada bruta (canal `rest:*`) e atualiza o status. Lacunas de livro são fechadas como irrecuperáveis.
+A recuperação é a primeira etapa do pipeline horário. Ela lê as lacunas abertas no `state.db`, aplica a estratégia do canal (doc 06 §9.1), grava o que obteve na camada bruta (canais `rest:klines` e `archive:trades`) e atualiza o status. O arquivo bruto novo faz a hora ser normalizada de novo na mesma rodada. Lacunas de livro já nascem irrecuperáveis.
+
+[PROPOSTA, 24/10/2026] Os timers separados previstos antes (`trader-recovery` a cada 5 min, para a REST, e `trader-archive` diário) foram trocados por essa etapa: no host de produção a REST de negócios não responde (doc 06 MD-18), um candle perdido pode esperar até a próxima hora sem prejuízo para a pesquisa, e fica um processo a menos (ADR-01, PP-07). Se a V0.3 precisar de recuperação mais rápida, um timer próprio chama a mesma etapa.
 
 ---
 
@@ -499,3 +497,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.7 | 23/10/2026 | §9.2: a cor nova ignora as marcas d'água enquanto a antiga está ativa (lacunas falsas observadas na primeira troca em produção); §5: backfill no pacote `pipeline`. |
 | 0.8 | 24/10/2026 | §9.2: correção manual das lacunas falsas da primeira troca; §5: `botocore[crt]` no MacBook. |
 | 0.9 | 24/10/2026 | §5: relatório de qualidade no pacote `pipeline`. |
+| 0.10 | 24/10/2026 | §4 e §6.4: recuperação de lacunas como etapa do pipeline horário, no lugar dos timers `trader-recovery` e `trader-archive`. |

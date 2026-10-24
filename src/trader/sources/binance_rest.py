@@ -1,6 +1,7 @@
 """Cliente REST de dados de mercado da Binance com teto próprio de peso (doc 06 §3.4-3.5)."""
 
 import asyncio
+import time
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -139,3 +140,37 @@ def _retry_after(response: httpx.Response) -> float:
         return max(1.0, float(response.headers.get("Retry-After", "60")))
     except ValueError:
         return 60.0
+
+
+def get_klines_sync(
+    client: httpx.Client, base_url: str, symbol: str, start_ms: int, end_ms: int
+) -> RestResponse:
+    """`/api/v3/klines` de 1 min (peso 2, até 1000 candles) para o pipeline, que é síncrono.
+
+    Marcas de tempo da resposta em µs. Uma rodada faz poucas chamadas; depois de 429 ou 418,
+    quem chama não faz mais nenhuma na rodada (RF-145).
+    """
+    params = {
+        "symbol": symbol,
+        "interval": "1m",
+        "startTime": str(start_ms),
+        "endTime": str(end_ms),
+        "limit": "1000",
+    }
+    sent = time.time_ns() // 1000
+    try:
+        response = client.get(
+            base_url + "/api/v3/klines",
+            params=params,
+            headers={"X-MBX-TIME-UNIT": "MICROSECOND"},
+        )
+    except httpx.HTTPError as exc:
+        raise RestError(f"/api/v3/klines: {exc!r}") from exc
+    recv = time.time_ns() // 1000
+    if response.status_code == 418:
+        raise IpBannedError(f"HTTP 418; bloqueado por {_retry_after(response)} s")
+    if response.status_code == 429:
+        raise RateLimitedError(_retry_after(response))
+    if response.status_code != 200:
+        raise RestError(f"/api/v3/klines: HTTP {response.status_code}")
+    return RestResponse("rest:klines", sent, recv, response.status_code, response.content)

@@ -13,6 +13,11 @@ OPEN_SUFFIX = ".open"
 SEALED_SUFFIX = ".jsonl"
 COMPRESSED_SUFFIX = ".jsonl.zst"
 
+RECOVERED_KLINES = "rest:klines"
+RECOVERED_TRADES = "archive:trades"
+RECOVERY_CHANNELS = (RECOVERED_KLINES, RECOVERED_TRADES)
+"""Canais brutos escritos pela recuperação de lacunas (doc 06 §9.1)."""
+
 _RAW_NAME = re.compile(r"^(?P<session>[A-Za-z0-9._-]+)\.jsonl(?P<suffix>\.open|\.zst)?$")
 _DATE_DIR = re.compile(r"^date=(\d{4}-\d{2}-\d{2})$")
 _HOUR_DIR = re.compile(r"^hour=(\d{2})$")

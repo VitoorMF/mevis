@@ -112,6 +112,11 @@ class PipelineConfig:
     aws_region: str | None = None
     statsd_host: str | None = None
     statsd_port: int = 8125
+    rest_base_url: str = "https://data-api.binance.vision"
+    """REST de dados de mercado para recuperar candles (doc 06 §9.1); vem de `[collector]`."""
+    archive_base_url: str = "https://data.binance.vision"
+    """Arquivos públicos para recuperar negócios (doc 06 §9.1)."""
+    recovery_enabled: bool = True
     trades_row_group: int = 50_000
     books_row_group: int = 2_000
 
@@ -125,6 +130,9 @@ class PipelineConfig:
             raise ConfigError(f"symbol deve ser alfanumérico em maiúsculas: {self.symbol!r}")
         if not 1 <= self.compression_level <= 22:
             raise ConfigError("compression_level deve estar entre 1 e 22")
+        for name in ("rest_base_url", "archive_base_url"):
+            if not getattr(self, name).startswith(("https://", "http://")):
+                raise ConfigError(f"{name} precisa ser http(s)")
         for f in fields(self):
             value = getattr(self, f.name)
             if f.name.endswith(("_s", "_ms", "_days", "_row_group")) and value <= 0:
@@ -150,7 +158,7 @@ def _check_keys(cls: type, values: Mapping[str, Any]) -> None:
 def load_pipeline_config(path: Path | None = None, **overrides: Any) -> PipelineConfig:
     tables = _read_tables(path)
     collector = tables.get("collector", {})
-    shared = ("symbol", "data_dir", "statsd_host", "statsd_port")
+    shared = ("symbol", "data_dir", "statsd_host", "statsd_port", "rest_base_url")
     values: dict[str, Any] = {k: collector[k] for k in shared if k in collector}
     values.update(tables.get("pipeline", {}))
     values.update({k: v for k, v in overrides.items() if v is not None})

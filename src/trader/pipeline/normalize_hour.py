@@ -23,10 +23,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from trader.core.models import Kline, Origin, Trade
 from trader.core.rawformat import RawRecord
 from trader.core.timeunits import SECOND_US, TimeUnit, floor_minute
 from trader.normalize.binance import (
     NormalizationError,
+    parse_archive_trade,
+    parse_rest_kline,
     parse_ws_depth_diff_header,
     parse_ws_depth_snapshot,
     parse_ws_kline,
@@ -44,7 +47,14 @@ from trader.quality.validation import (
     validate_trade,
 )
 from trader.storage import parquet
-from trader.storage.layout import HOUR_US, RawFile, dataset_path, quarantine_path
+from trader.storage.layout import (
+    HOUR_US,
+    RECOVERED_KLINES,
+    RECOVERED_TRADES,
+    RawFile,
+    dataset_path,
+    quarantine_path,
+)
 from trader.storage.quarantine import QuarantineWriter
 from trader.storage.rawfiles import BadLine, iter_records
 
@@ -80,6 +90,10 @@ class _HourNormalizer:
             diff_stream: self._diff,
         }
         self.trade_stream, self.kline_stream = trade_stream, kline_stream
+        self.recovered: dict[str, Any] = {
+            RECOVERED_TRADES: self._archive_trades,
+            RECOVERED_KLINES: self._rest_klines,
+        }
         self.top20_stream, self.diff_stream = top20_stream, diff_stream
         self._seen: dict[str, dict[int, int]] = {s: {} for s in self.streams}
         self._max_update_id: int | None = None
@@ -138,6 +152,14 @@ class _HourNormalizer:
                 yield item.recv_ts_us, index, line_no, item
 
     def _handle(self, record: RawRecord) -> None:
+        recovered = self.recovered.get(record.channel)
+        if recovered is not None:
+            # Só arquivos da própria hora chegam aqui: o recebimento é o da recuperação.
+            try:
+                recovered(record, json.loads(record.payload))
+            except (ValueError, KeyError, TypeError, NormalizationError) as exc:
+                self._reject(record.channel, f"recuperação: {exc!r}", record=record)
+            return
         handler = self.streams.get(record.channel)
         if handler is None:
             return
@@ -157,32 +179,73 @@ class _HourNormalizer:
         trade = parse_ws_trade(
             data, recv_ts_us=record.recv_ts_us, unit=UNIT, provenance=record.session
         )
+        self._add_trade(record, trade)
+
+    def _archive_trades(self, record: RawRecord, payload: Mapping[str, Any]) -> None:
+        """Linha do arquivo diário gravada pela recuperação (doc 06 §9.1)."""
+        trade = parse_archive_trade(
+            payload["row"],
+            symbol=self.config.symbol,
+            unit=TimeUnit(payload["unit"]),
+            provenance=f"{payload['file']}@{payload['sha256']}",
+        )
+        self._add_trade(record, trade)
+
+    def _add_trade(self, record: RawRecord, trade: Trade) -> None:
+        channel = self.trade_stream
         fingerprint = hash(
             (str(trade.price), str(trade.qty), trade.trade_ts_us, trade.is_buyer_maker)
         )
-        if not self._first_copy(record, trade.trade_id, fingerprint, trade.trade_ts_us):
+        if not self._first_copy(record, trade.trade_id, fingerprint, trade.trade_ts_us, channel):
             return
         if not self._in_hour(trade.trade_ts_us):
             return
-        offset = self.clock.offset_at(record.recv_ts_us) or 0
-        issues = validate_trade(
-            trade,
-            clock_offset_us=offset,
-            late_limit_us=int(self.config.late_limit_s * SECOND_US),
-        )
-        if not self._accept(record, issues, trade.trade_ts_us):
+        if trade.recv_ts_us is None:
+            issues = validate_trade(trade)
+        else:
+            offset = self.clock.offset_at(trade.recv_ts_us) or 0
+            issues = validate_trade(
+                trade,
+                clock_offset_us=offset,
+                late_limit_us=int(self.config.late_limit_s * SECOND_US),
+            )
+        if not self._accept(record, issues, trade.trade_ts_us, channel):
             return
         if Issue.TRADE_LATE in issues:
-            self._flag(record.channel, trade.trade_ts_us, Flag.LATE)
-        self._flag(record.channel, trade.trade_ts_us, Flag.DATA)
+            self._flag(channel, trade.trade_ts_us, Flag.LATE)
+        self._flag(channel, trade.trade_ts_us, Flag.DATA)
+        if trade.origin is not Origin.LIVE:
+            self._flag(channel, trade.trade_ts_us, Flag.RECOVERED)
         self.writers["trades"].add(parquet.trade_row(trade))
 
     def _kline(self, record: RawRecord, data: Mapping[str, Any]) -> None:
         kline = parse_ws_kline(
             data, recv_ts_us=record.recv_ts_us, unit=UNIT, provenance=record.session
         )
-        if kline is None:
-            return
+        if kline is not None:
+            self._add_kline(record, kline)
+
+    def _rest_klines(self, record: RawRecord, payload: Any) -> None:
+        """Resposta de `/api/v3/klines` gravada pela recuperação, já recortada na hora."""
+        if not isinstance(payload, list):
+            raise NormalizationError("resposta de klines não é uma lista")
+        for row in payload:
+            try:
+                kline = parse_rest_kline(
+                    row,
+                    symbol=self.config.symbol,
+                    interval="1m",
+                    unit=UNIT,
+                    origin=Origin.REST,
+                    provenance=record.session,
+                )
+            except NormalizationError as exc:
+                self._reject(record.channel, f"recuperação: {exc}", record=record)
+                continue
+            self._add_kline(record, kline)
+
+    def _add_kline(self, record: RawRecord, kline: Kline) -> None:
+        channel = self.kline_stream
         fingerprint = hash(
             (
                 str(kline.open),
@@ -193,13 +256,15 @@ class _HourNormalizer:
                 kline.trade_count,
             )
         )
-        if not self._first_copy(record, kline.open_ts_us, fingerprint, kline.open_ts_us):
+        if not self._first_copy(record, kline.open_ts_us, fingerprint, kline.open_ts_us, channel):
             return
         if not self._in_hour(kline.open_ts_us):
             return
-        if not self._accept(record, validate_kline(kline), kline.open_ts_us):
+        if not self._accept(record, validate_kline(kline), kline.open_ts_us, channel):
             return
-        self._flag(record.channel, kline.open_ts_us, Flag.DATA)
+        self._flag(channel, kline.open_ts_us, Flag.DATA)
+        if kline.origin is not Origin.LIVE:
+            self._flag(channel, kline.open_ts_us, Flag.RECOVERED)
         self.writers["klines_1m"].add(parquet.kline_row(kline))
 
     def _top20(self, record: RawRecord, data: Mapping[str, Any]) -> None:
@@ -232,26 +297,33 @@ class _HourNormalizer:
 
     # --------------------------------------------------------------------- apoio
 
-    def _first_copy(self, record: RawRecord, key: int, fingerprint: int, ts_us: int) -> bool:
-        seen = self._seen[record.channel]
+    def _first_copy(
+        self, record: RawRecord, key: int, fingerprint: int, ts_us: int, channel: str | None = None
+    ) -> bool:
+        """`channel`: o stream cujas chaves valem (a recuperação deduplica contra o ao vivo)."""
+        channel = channel or record.channel
+        seen = self._seen[channel]
         previous = seen.get(key)
         if previous is None:
             seen[key] = fingerprint
             return True
         if self._in_hour(ts_us):
             if previous == fingerprint:
-                self.result.duplicates[record.channel] += 1
+                self.result.duplicates[channel] += 1
             else:
-                self._reject(record.channel, "cópia com conteúdo diferente", record=record)
-                self._flag(record.channel, ts_us, Flag.INVALID)
+                self._reject(channel, "cópia com conteúdo diferente", record=record)
+                self._flag(channel, ts_us, Flag.INVALID)
         return False
 
-    def _accept(self, record: RawRecord, issues: Sequence[Issue], ts_us: int) -> bool:
+    def _accept(
+        self, record: RawRecord, issues: Sequence[Issue], ts_us: int, channel: str | None = None
+    ) -> bool:
+        channel = channel or record.channel
         rejecting = [i.value for i in issues if i in REJECTING_ISSUES]
         if not rejecting:
             return True
-        self._reject(record.channel, ",".join(rejecting), record=record)
-        self._flag(record.channel, ts_us, Flag.INVALID)
+        self._reject(channel, ",".join(rejecting), record=record)
+        self._flag(channel, ts_us, Flag.INVALID)
         return False
 
     def _in_hour(self, ts_us: int) -> bool:

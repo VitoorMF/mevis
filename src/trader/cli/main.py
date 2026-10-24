@@ -33,6 +33,7 @@ from trader.ops.state import StateStore
 from trader.pipeline.backfill import Backfill, BackfillBusy, BackfillReport
 from trader.pipeline.hourly import HourlyPipeline, PipelineBusy
 from trader.pipeline.quality_report import build_report
+from trader.recovery.gaps import GapRecovery
 from trader.sources.binance_archive import DATASETS, ArchiveClient, ArchiveError
 from trader.sources.binance_rest import BinanceRest, WeightLimiter
 from trader.sources.binance_ws import websockets_connector
@@ -219,9 +220,16 @@ def _print_recent_gaps(state_path: Path, now_us: int) -> None:
 
 def run_pipeline(config: PipelineConfig, *, rebuild: bool = False) -> int:
     store = _object_store(config)
-    with StateStore(config.data_dir / "state.db") as state:
+    with (
+        StateStore(config.data_dir / "state.db") as state,
+        httpx.Client(timeout=60.0) as client,
+    ):
+        recovery = None
+        if config.recovery_enabled:
+            archive = ArchiveClient(client, config.archive_base_url)
+            recovery = GapRecovery(config, state, client, archive)
         try:
-            report = HourlyPipeline(config, state, store).run(
+            report = HourlyPipeline(config, state, store, recovery).run(
                 time.time_ns() // 1000, rebuild=rebuild
             )
         except PipelineBusy as exc:
@@ -233,6 +241,10 @@ def run_pipeline(config: PipelineConfig, *, rebuild: bool = False) -> int:
         metrics.close()
     hours = ", ".join(_hour_label(h) for h in report.normalized_hours) or "nenhuma"
     print(f"órfãos fechados: {report.sealed_orphans} · comprimidos: {report.compressed}")
+    print(
+        f"lacunas: recuperadas {report.recovered_gaps} · irrecuperáveis"
+        f" {report.irrecoverable_gaps} · pendentes {report.pending_gaps}"
+    )
     print(f"horas normalizadas: {hours}")
     if report.normalized_hours:
         rows = " · ".join(f"{k}: {v}" for k, v in sorted(report.rows.items()))

@@ -280,6 +280,16 @@ class StateStore:
         rows = self._db.execute("SELECT session_id FROM sessions WHERE closed_ts_us IS NOT NULL")
         return {row[0] for row in rows}
 
+    def open_gaps(self, channel: str) -> list[StoredGap]:
+        """Lacunas ainda abertas (recuperáveis) de um canal, na ordem de detecção."""
+        return self._gaps("channel = ? AND status = 'open'", (channel,))
+
+    def set_gap_status(self, gap_id: int, status: str, recovery_origin: str | None) -> None:
+        self._db.execute(
+            "UPDATE gaps SET status = ?, recovery_origin = ? WHERE gap_id = ?",
+            (status, recovery_origin, gap_id),
+        )
+
     def gaps_overlapping(self, start_ts_us: int, end_ts_us: int) -> list[StoredGap]:
         """Lacunas cujo intervalo cruza `[start_ts_us, end_ts_us)`."""
         return self._gaps("start_ts_us < ? AND end_ts_us > ?", (end_ts_us, start_ts_us))

@@ -3,12 +3,14 @@
 Etapas, todas idempotentes (reexecutar não duplica nada):
 
 1. fechar arquivos `.open` órfãos (sessão encerrada ou hora vencida há mais que a carência);
-2. comprimir e verificar os arquivos fechados (RF-137) e registrá-los no estado;
-3. normalizar as horas cujas entradas mudaram desde a última execução (RF-133) e gerar a
+2. recuperar lacunas abertas, gravando o obtido na camada bruta (doc 06 §9.1); uma falha aqui
+   só adia a recuperação, nunca interrompe o pipeline;
+3. comprimir e verificar os arquivos fechados (RF-137) e registrá-los no estado;
+4. normalizar as horas cujas entradas mudaram desde a última execução (RF-133) e gerar a
    máscara de qualidade (RF-159);
-4. exportar os datasets operacionais (doc 06 §5.4) e uma cópia do estado;
-5. replicar no armazenamento durável o que ainda não foi replicado (RF-136);
-6. apagar do disco local o que já foi replicado e passou da retenção (RF-138).
+5. exportar os datasets operacionais (doc 06 §5.4) e uma cópia do estado;
+6. replicar no armazenamento durável o que ainda não foi replicado (RF-136);
+7. apagar do disco local o que já foi replicado e passou da retenção (RF-138).
 
 Uma hora só é normalizada quando todos os seus arquivos brutos estão fechados. Se arquivos
 novos aparecerem depois (vizinhos, recuperações, lacunas detectadas mais tarde), o resumo das
@@ -34,11 +36,14 @@ from trader.ops.logs import ctx
 from trader.ops.state import RawFileRow, StateStore
 from trader.pipeline.normalize_hour import normalize_hour
 from trader.quality.mask import ClockReference, GapSpan, build_mask
+from trader.recovery.gaps import GapRecovery
 from trader.storage import parquet
 from trader.storage.layout import (
     HOUR_US,
+    RECOVERY_CHANNELS,
     RawFile,
     RawState,
+    channel_dir,
     dataset_path,
     relative,
     scan_raw,
@@ -66,21 +71,30 @@ class PipelineReport:
     deleted: int = 0
     replication_lag_minutes: float | None = None
     """Idade do item mais antigo ainda não replicado (0 se nada pendente; None sem réplica)."""
+    recovered_gaps: int = 0
+    irrecoverable_gaps: int = 0
+    pending_gaps: int = 0
 
 
 class HourlyPipeline:
     def __init__(
-        self, config: PipelineConfig, state: StateStore, store: ObjectStore | None
+        self,
+        config: PipelineConfig,
+        state: StateStore,
+        store: ObjectStore | None,
+        recovery: GapRecovery | None = None,
     ) -> None:
         self._config = config
         self._state = state
         self._store = store
+        self._recovery = recovery
         self._data_dir = config.data_dir
 
     def run(self, now_us: int, *, rebuild: bool = False) -> PipelineReport:
         report = PipelineReport()
         with self._lock():
             self._seal_orphans(now_us, report)
+            self._recover(now_us, report)
             self._compress(now_us, report)
             self._normalize(now_us, report, rebuild=rebuild)
             self._export_ops(now_us)
@@ -114,6 +128,18 @@ class HourlyPipeline:
                     "arquivo órfão fechado", extra=ctx(path=relative(self._data_dir, target))
                 )
 
+    def _recover(self, now_us: int, report: PipelineReport) -> None:
+        if self._recovery is None:
+            return
+        try:
+            result = self._recovery.run(now_us)
+        except Exception as exc:  # a recuperação nunca derruba o pipeline (doc 06 §9.1)
+            log.error("recuperação falhou", extra=ctx(error=repr(exc)))
+            return
+        report.recovered_gaps = result.recovered
+        report.irrecoverable_gaps = result.irrecoverable
+        report.pending_gaps = result.pending
+
     def _compress(self, now_us: int, report: PipelineReport) -> None:
         for raw in self._scan(RawState.SEALED):
             result = compress_file(raw.path, self._config.compression_level)
@@ -143,7 +169,7 @@ class HourlyPipeline:
         )
 
     def _normalize(self, now_us: int, report: PipelineReport, *, rebuild: bool) -> None:
-        streams = set(self._config.streams)
+        streams = set(self._config.streams) | {channel_dir(c) for c in RECOVERY_CHANNELS}
         rows = [r for r in self._state.raw_files() if r.channel_dir in streams]
         open_hours = {f.hour for f in self._scan(RawState.OPEN) if f.channel_dir in streams}
         for hour in sorted({r.hour for r in rows}):

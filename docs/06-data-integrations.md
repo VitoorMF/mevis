@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.9 — rascunho |
+| Versão | 0.10 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -464,6 +464,18 @@ No host, máscara e camada normalizada ficam só 7 dias no disco (§6.2). Para p
 
 Dados recuperados: `origin = rest` ou `archive`, `recv_ts_us` nulo, mesma validação dos dados ao vivo (RF-149).
 
+### 9.1 Como a recuperação funciona
+
+É a primeira etapa do pipeline horário (doc 03 §6.4), antes da compressão:
+
+1. **Candles** (lacuna `kline_missing` aberta, já encerrada): pede `/api/v3/klines` (peso 2) ao `rest_base_url` só para os minutos ausentes, com horário em µs. A resposta vai para a camada bruta no canal `rest:klines`, dividida pela hora de cada candle. Minuto que a REST também não traz: a lacuna fica `irrecoverable`.
+2. **Negócios** (lacuna `trade_id_jump` aberta): quando o arquivo diário do dia da lacuna sai, ele é baixado com checksum verificado (§7), e as linhas dos ids ausentes vão para a camada bruta no canal `archive:trades`, na hora de cada negócio. O payload traz o nome do arquivo, o SHA-256, a unidade de tempo e os campos da linha. Id que o arquivo oficial também não tem: `irrecoverable`. Arquivo ainda não publicado (HTTP 404): nova tentativa na próxima rodada. `historicalTrades` não é usado: no host de produção ele responde 451 (MD-18).
+3. **Livro:** nada a fazer; as lacunas já nascem irrecuperáveis (RN-009).
+4. **Normalização:** os canais de recuperação passam pela mesma deduplicação do stream correspondente (a cópia ao vivo, recebida antes, prevalece), pela mesma validação e entram com `origin = rest` ou `archive`, `recv_ts_us` nulo e o minuto marcado `recovered` na máscara. O arquivo bruto novo muda o resumo das entradas da hora e dispara a renormalização (doc 03 §6.3).
+5. **Status:** a lacuna passa a `recovered`, com `recovery_origin` = `rest:klines` ou `archive:<arquivo>@<SHA-256>`, ou a `irrecoverable`.
+6. **Falhas** de rede, HTTP 5xx ou 429 não interrompem o pipeline: a lacuna continua aberta e volta na próxima rodada. Depois de um 429, nenhuma outra chamada REST na mesma rodada (RF-145).
+7. **Limite:** lacunas cuja hora já saiu do disco local (mais de 7 dias, §6.2) não são recuperadas automaticamente.
+
 ---
 
 ## 10. Livro de ofertas: reconstrução futura (F-04)
@@ -549,3 +561,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.7 | 23/10/2026 | §7: períodos aprovados e funcionamento do backfill (saída por dia, quarentena, relatório, retomada, réplica, limite com a coleta ao vivo); MD-25. |
 | 0.8 | 24/10/2026 | §7: MD-26 (candles importados no host) e carga de negócios no MacBook; pendência de onde rodar resolvida; MD-27 com o resultado da carga de negócios. |
 | 0.9 | 24/10/2026 | §8.3: relatório de qualidade (CA-05); datasets operacionais `hour_stats` e `backfill_files` em §5.4. |
+| 0.10 | 24/10/2026 | §9.1: funcionamento da recuperação de lacunas (canais brutos `rest:klines` e `archive:trades`, status, falhas). |
