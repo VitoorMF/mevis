@@ -351,7 +351,7 @@ A transição para classes de armazenamento mais baratas no S3 (por idade) será
 |---|---|---|---|
 | Bruta comprimida | ~170 MB (pico ~260 MB) | ~5,2 GB | ~62 GB |
 | Normalizada + derivada [ESTIMATIVA, medir na V0.1] | ~80 MB | ~2,4 GB | ~14 GB (6 meses retidos) |
-| Backfill (§7), carga única | — | — | ~9 GB de negócios (MD-25) e ~0,1 GB de candles |
+| Backfill (§7), carga única | — | — | 11,9 GB de negócios (MD-27) e ~0,1 GB de candles |
 | **Total** | **~250 MB** | **~7,6 GB** | **~85 GB** |
 
 Custo de armazenamento S3 Standard ao fim de 12 meses na us-east-2 (US$ 0,023/GB-mês, DEC-26): cerca de US$ 1,96 por mês (doc 03 §10). Requisições de gravação (dezenas de arquivos por hora) custam centavos por mês. A transferência para o MacBook entra na franquia mensal de saída para a internet [A VERIFICAR].
@@ -363,7 +363,7 @@ Custo de armazenamento S3 Standard ao fim de 12 meses na us-east-2 (US$ 0,023/GB
 | Dataset | Fonte | Período (aprovado em 23/10/2026) | Observações |
 |---|---|---|---|
 | `klines_1m` | Arquivos mensais (meses completos) e diários (mês incompleto) | 01/01/2023 a 22/10/2026 | ~3 anos para pesquisa de candles (H-01, H-02). |
-| `trades` | Arquivos diários | 23/10/2025 a 22/10/2026 | ~3,5 milhões de linhas por dia; ~25 MB/dia e ~9 GB por ano em Parquet (MD-25). |
+| `trades` | Arquivos diários | 23/10/2025 a 22/10/2026 | ~3,8 milhões de linhas por dia em média; 11,9 GB em Parquet (MD-27). |
 | `agg_trades` | Arquivos | Sob demanda | Could (DEC-19); não implementado. |
 
 Os períodos terminam na véspera do início da coleta contínua (23/10/2026, 22:44 UTC). A REST não é usada no backfill: o dia corrente fica com a coleta ao vivo.
@@ -373,6 +373,8 @@ Os períodos terminam na véspera do início da coleta contínua (23/10/2026, 22
 **MD-26 — candles de 01/01/2023 a 22/10/2026, importados no host de produção:** 67 arquivos (45 mensais, 22 diários), 2.002.960 linhas em 1.391 dias, 81 s de CPU com `CPUQuota` de 25% (~25 mil linhas/s por núcleo, ~3,7× mais lento que o M2) e saldo de créditos de CPU subindo durante a carga. Faltam 80 minutos, todos no arquivo de março de 2023 [HIPÓTESE: a parada de negociação de spot da Binance em 24/03/2023].
 
 **Carga de negócios 2025–2026:** rodada no MacBook, com envio direto ao S3 (decisão de 23/10/2026). No host, pela taxa de MD-26 e com o limite de 25% de CPU, levaria ~2 dias. No MacBook, ~1 min por dia de arquivo, contando download e envio. O `boto3` precisa de `botocore[crt]` para usar as credenciais de `aws login`; é dependência só de desenvolvimento e não vai para o host.
+
+**MD-27 — negócios de 23/10/2025 a 22/10/2026, importados no MacBook:** 365 arquivos diários, 1.404.534.054 linhas (~3,8 milhões por dia, com pico de 15,4 milhões em 05/02/2026), sem quarentena, repetições ou ids ausentes dentro dos arquivos; 11,93 GB de Parquet no S3; 5h54 de execução, entre 25 e 204 s por dia. O relatório do MacBook está em `derived/ops/backfill_files-macbook.parquet`. A continuidade dos ids entre um dia e o seguinte não foi verificada.
 
 Regras: checksum verificado antes da importação (RF-143); unidade de tempo conforme a data do arquivo (§4.1); importação idempotente (RF-144); `origin = archive`; `recv_ts_us` nulo.
 
@@ -526,4 +528,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.5 | 23/10/2026 | §2.4 com o acesso medido a partir da us-east-2 (MD-16 a MD-21); endpoints e recuperação de negócios ajustados para produção nos EUA (DEC-26); custo de S3 com preço da us-east-2. |
 | 0.6 | 23/10/2026 | Medições no host de produção (MD-22 a MD-24); sonda de relógio em rajada de 5 pedidos, com a amostra de menor ida e volta (§4.2), resolvendo a pendência de precisão. |
 | 0.7 | 23/10/2026 | §7: períodos aprovados e funcionamento do backfill (saída por dia, quarentena, relatório, retomada, réplica, limite com a coleta ao vivo); MD-25. |
-| 0.8 | 24/10/2026 | §7: MD-26 (candles importados no host) e carga de negócios no MacBook; pendência de onde rodar resolvida. |
+| 0.8 | 24/10/2026 | §7: MD-26 (candles importados no host) e carga de negócios no MacBook; pendência de onde rodar resolvida; MD-27 com o resultado da carga de negócios. |
