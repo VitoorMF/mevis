@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.8 — rascunho |
+| Versão | 0.9 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -158,7 +158,8 @@ trader/
   storage/     layout de caminhos, escrita de Parquet, sincronização S3, retenção
   recovery/    estratégias de recuperação por canal
   pipeline/    rodada horária: órfãos, compressão, normalização por hora, máscara, exportações,
-               réplica e retenção; backfill dos arquivos públicos (doc 06 §7)
+               réplica e retenção; backfill dos arquivos públicos (doc 06 §7);
+               relatório de qualidade (doc 06 §8.3)
   ops/         configuração, logs estruturados, StatsD, saúde, estado SQLite
   cli/         comandos
 ```
@@ -497,3 +498,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.6 | 23/10/2026 | DEC-26: região us-east-2 (a conta só aceita essa região; acesso à Binance medido); custos recalculados com preços da us-east-2; plano B para Tóquio. |
 | 0.7 | 23/10/2026 | §9.2: a cor nova ignora as marcas d'água enquanto a antiga está ativa (lacunas falsas observadas na primeira troca em produção); §5: backfill no pacote `pipeline`. |
 | 0.8 | 24/10/2026 | §9.2: correção manual das lacunas falsas da primeira troca; §5: `botocore[crt]` no MacBook. |
+| 0.9 | 24/10/2026 | §5: relatório de qualidade no pacote `pipeline`. |

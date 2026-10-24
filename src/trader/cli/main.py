@@ -1,7 +1,9 @@
-"""Linha de comando: `collect`, `status`, `pipeline`, `backfill` e `smoke` (RF-181 a RF-185)."""
+"""Linha de comando: `collect`, `status`, `pipeline`, `backfill`, `quality` e `smoke` (RF-181 a
+RF-185)."""
 
 import argparse
 import asyncio
+import json
 import signal
 import sys
 import time
@@ -30,6 +32,7 @@ from trader.ops.smoke import run_smoke
 from trader.ops.state import StateStore
 from trader.pipeline.backfill import Backfill, BackfillBusy, BackfillReport
 from trader.pipeline.hourly import HourlyPipeline, PipelineBusy
+from trader.pipeline.quality_report import build_report
 from trader.sources.binance_archive import DATASETS, ArchiveClient, ArchiveError
 from trader.sources.binance_rest import BinanceRest, WeightLimiter
 from trader.sources.binance_ws import websockets_connector
@@ -74,15 +77,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     backfill.add_argument("--end", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
     backfill.add_argument("--log-level", default="INFO")
 
+    quality = commands.add_parser(
+        "quality", help="relatório de qualidade de um período (doc 06 §8.3)"
+    )
+    quality.add_argument("--config", type=Path, help="arquivo TOML com a tabela [pipeline]")
+    quality.add_argument("--data-dir", type=Path)
+    quality.add_argument("--start", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
+    quality.add_argument("--end", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
+    quality.add_argument("--json", type=Path, help="grava também o relatório em JSON")
+
     smoke = commands.add_parser("smoke", help="testa a conectividade com a Binance (doc 03 §9.4)")
     smoke.add_argument("--config", type=Path)
     smoke.add_argument("--duration", type=float, default=600.0, help="segundos de WebSocket")
 
     args = parser.parse_args(argv)
     try:
-        if args.command in ("pipeline", "backfill"):
+        if args.command in ("pipeline", "backfill", "quality"):
             pipeline_config = load_pipeline_config(
-                args.config, data_dir=args.data_dir, replica_dir=args.replica_dir
+                args.config,
+                data_dir=args.data_dir,
+                replica_dir=getattr(args, "replica_dir", None),
             )
         else:
             config = load_config(
@@ -99,6 +113,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "backfill":
         configure_logging(args.log_level)
         return run_backfill(pipeline_config, args.dataset, args.start, args.end)
+    if args.command == "quality":
+        return quality_report(pipeline_config, args.start, args.end, args.json)
     if args.command == "collect":
         configure_logging(args.log_level)
         asyncio.run(run_collector(config, args.duration))
@@ -249,6 +265,18 @@ def run_backfill(config: PipelineConfig, dataset: str, start: date, end: date) -
             return 1
     _print_backfill(report, replicated=store is not None)
     return 1 if report.with_status("rejected") else 0
+
+
+def quality_report(config: PipelineConfig, start: date, end: date, json_path: Path | None) -> int:
+    if start > end:
+        print(f"início {start} depois do fim {end}", file=sys.stderr)
+        return 2
+    with StateStore(config.data_dir / "state.db") as state:
+        report = build_report(config.data_dir, state, config.symbol, start, end)
+    print("\n".join(report.lines()))
+    if json_path is not None:
+        json_path.write_text(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+    return 0
 
 
 def _print_backfill(report: BackfillReport, *, replicated: bool) -> None:

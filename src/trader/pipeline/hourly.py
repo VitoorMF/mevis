@@ -47,7 +47,7 @@ from trader.storage.objectstore import ObjectStore
 from trader.storage.rawfiles import compress_file, content_digest, file_sha256
 
 log = logging.getLogger(__name__)
-OPS_TABLES = ("sessions", "gaps", "clock_offsets", "backfill_files")
+OPS_TABLES = ("sessions", "gaps", "clock_offsets", "backfill_files", "hour_stats")
 
 
 class PipelineBusy(RuntimeError):
@@ -194,6 +194,15 @@ class HourlyPipeline:
                 )
             for path in result.removed:
                 self._state.mark_output(relative(self._data_dir, path), deleted_ts_us=now_us)
+            self._state.set_hour_stats(
+                self._config.symbol,
+                hour,
+                {
+                    **{("rows", k): v for k, v in result.rows.items()},
+                    **{("duplicates", k): v for k, v in result.duplicates.items()},
+                    **{("quarantined", k): v for k, v in result.quarantined.items()},
+                },
+            )
             self._state.set_normalized(self._config.symbol, hour, digest, now_us)
             report.normalized_hours.append(hour)
             report.rows.update(result.rows)

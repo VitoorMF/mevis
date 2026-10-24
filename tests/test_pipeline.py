@@ -3,6 +3,7 @@
 import fcntl
 import json
 from dataclasses import replace
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from trader.ingest.raw_writer import RawWriter
 from trader.ops.config import PipelineConfig
 from trader.ops.state import GapRecord, StateStore
 from trader.pipeline.hourly import HourlyPipeline, PipelineBusy
+from trader.pipeline.quality_report import build_report
 from trader.storage.layout import HOUR_US, dataset_path, hour_dirs, quarantine_path, raw_root
 from trader.storage.objectstore import LocalDirectoryStore
 
@@ -282,3 +284,21 @@ def test_replication_lag_metric(scenario: tuple[PipelineConfig, Path]) -> None:
     with StateStore(config.data_dir / "state.db") as state:
         without_replica = HourlyPipeline(config, state, None).run(END + 2 * HOUR_US)
     assert without_replica.replication_lag_minutes is None
+
+
+def test_quality_report_matches_pipeline_output(scenario: tuple[PipelineConfig, Path]) -> None:
+    """CA-05: o relatório do dia bate com o que o pipeline normalizou (doc 06 §8.3)."""
+    config, replica = scenario
+    report = run(config, replica, END + 2 * HOUR_US)
+    day = date(2026, 10, 23)
+    with StateStore(config.data_dir / "state.db") as state:
+        quality = build_report(config.data_dir, state, "BTCUSDT", day, day)
+
+    assert quality.rows == dict(report.rows)
+    assert quality.duplicates[TRADE] == report.duplicates[TRADE] == 5
+    assert sum(quality.quarantined.values()) == report.quarantined
+    assert len(quality.hours_without_mask) == 24 - 3
+    assert quality.mask[TRADE]["missing"] >= 1
+    ratio = quality.completeness(KLINE)
+    assert ratio is not None and ratio < 1
+    assert quality.delays["trades"].count == report.rows["trades"]

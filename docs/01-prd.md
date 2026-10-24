@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 01 — PRD |
-| Versão | 0.8 — rascunho |
+| Versão | 0.9 — rascunho |
 | Status | Decisões até DEC-24; aguardando confirmação da conta AWS e revisão final (§19) |
 | Data | 23/10/2026 |
 | Responsável pelo produto | *a preencher* |
@@ -576,6 +576,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | PD-09 | A V0.3 depende do resultado da V0.2? | — | A construção do motor não depende; a promoção de um modelo para paper trading depende de G2 (§8.3). | Este PRD | Doc 08 |
 | PD-10 | Interface de operação. | (a) CLI, relatórios e logs; (b) painel visual. | (a) no MVP; painel como Could (F-32). | Doc 03 | Nada |
 | PD-11 | Spot × futuros no longo prazo. | — | Adiar para depois do MVP. | Pós-MVP | Nada |
+| PD-15 a PD-23 | Método da V0.2: horizontes, alvo, holdouts das duas trilhas, latência assumida para dados de arquivo, custo base, valores dos critérios de G2, uso dos candles de 2023–2025 e onde gerar os agregados por minuto. | Ver doc 04 §1 | Ver doc 04 §1 | Doc 04 | V0.2 e G2 |
 ### 17.3 Pendências resolvidas
 
 | Pendência | Resolvida em | Resultado |
@@ -632,6 +633,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | 0.6 | 23/10/2026 | Teto pós-créditos revisto para R$ 100/mês (DEC-16, RS-09); DEC-23 reescrita (t4g.micro após os créditos); DEC-24 aprova ADR-01 a ADR-12 e resolve PD-12 e PD-13. |
 | 0.7 | 23/10/2026 | DEC-25: nome do projeto MERIS — Market Evidence & Research Intelligence System; PD-01 resolvida. |
 | 0.8 | 23/10/2026 | DEC-26: região us-east-2 (substitui DEC-21), após descobrir que a conta só aceita essa região e medir o acesso à Binance a partir dela; PR-12, R-18, RS-09 e DEC-23 revistos. |
+| 0.9 | 24/10/2026 | §17.2: PD-15 a PD-23, decisões de método da V0.2 propostas no doc 04. |
 
 ---
 

@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.8 — rascunho |
+| Versão | 0.9 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -314,6 +314,8 @@ Repetição do mesmo `last_update_id` mantém a primeira ocorrência (SRS §3). 
 | `gaps` | (`channel`, `start_ts_us`) | `end_ts_us`, causa, `detected_ts_us`, recuperável, status, origem da recuperação; para negócios, `first_missing_id` e `last_missing_id` |
 | `clock_offsets` | `local_ts_us` | `server_ts_us`, `rtt_us`, `offset_us` |
 | `quality_mask` | (`channel`, `minute_ts_us`) | `status` (§8.2), detalhes |
+| `hour_stats` | (`symbol`, `hour`, `metric`, `key`) | `value`: linhas por dataset (`rows`), repetições descartadas e registros em quarentena por canal (`duplicates`, `quarantined`) em cada hora normalizada; refeito quando a hora é normalizada de novo |
+| `backfill_files` | `file_name` | dataset, período, status, SHA-256, linhas, quarentena, repetições, ids ausentes, minutos sem candle, saídas (§7) |
 
 ### 5.5 Versionamento de esquema
 
@@ -431,6 +433,23 @@ Um registro por canal e por minuto UTC. Estados, do pior para o melhor:
 
 Se mais de um estado se aplica ao minuto, prevalece o pior. A pesquisa (V0.2) e o Risk Manager (V0.3) consultam a máscara para excluir janelas contaminadas (RN-005).
 
+### 8.3 Relatório de qualidade (RF-158, CA-05)
+
+`trader quality --start AAAA-MM-DD --end AAAA-MM-DD [--json <arquivo>]` cobre os dias UTC completos do período e lê o diretório de dados local.
+
+| Seção | Conteúdo | Fonte |
+|---|---|---|
+| Completude | Por canal: minutos em cada estado da máscara e a fração sem `missing`; horas sem máscara | `derived/quality_mask` |
+| Lacunas | Por canal e status: quantidade e duração dentro do período | `gaps` |
+| Repetições e quarentena | Por canal; linhas normalizadas por dataset | `hour_stats` |
+| Anomalias | Minutos `invalid`, `late` e `low_clock_confidence` | `derived/quality_mask` |
+| Atraso do evento ao recebimento | p50, p90, p99, p99,9 e máximo, em ms, de negócios e candles ao vivo, sem correção de offset; quantidade com atraso negativo | `normalized/trades` e `normalized/klines_1m` |
+| Relógio | Medições, offset mediano e maior offset em módulo, ida e volta mediana | `clock_offsets` |
+| Sessões | Sessões abertas no período, por motivo de encerramento | `sessions` |
+| Armazenamento | Bruto comprimido e original por dia (CA-06) | `raw_files` |
+
+No host, máscara e camada normalizada ficam só 7 dias no disco (§6.2). Para períodos mais antigos, o relatório roda sobre uma cópia: `derived/` e `normalized/` baixados do S3 e o estado de `ops/state-backup.db`. Dias importados pelo backfill não têm máscara nem horário de recebimento e ficam fora do relatório (§7, item 10).
+
 ---
 
 ## 9. Recuperação de falhas por canal
@@ -529,3 +548,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.6 | 23/10/2026 | Medições no host de produção (MD-22 a MD-24); sonda de relógio em rajada de 5 pedidos, com a amostra de menor ida e volta (§4.2), resolvendo a pendência de precisão. |
 | 0.7 | 23/10/2026 | §7: períodos aprovados e funcionamento do backfill (saída por dia, quarentena, relatório, retomada, réplica, limite com a coleta ao vivo); MD-25. |
 | 0.8 | 24/10/2026 | §7: MD-26 (candles importados no host) e carga de negócios no MacBook; pendência de onde rodar resolvida; MD-27 com o resultado da carga de negócios. |
+| 0.9 | 24/10/2026 | §8.3: relatório de qualidade (CA-05); datasets operacionais `hour_stats` e `backfill_files` em §5.4. |

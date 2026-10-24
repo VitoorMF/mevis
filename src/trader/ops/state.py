@@ -75,6 +75,14 @@ CREATE TABLE IF NOT EXISTS normalized_hours (
     normalized_ts_us  INTEGER NOT NULL,
     PRIMARY KEY (symbol, hour)
 );
+CREATE TABLE IF NOT EXISTS hour_stats (
+    symbol            TEXT NOT NULL,
+    hour              INTEGER NOT NULL,
+    metric            TEXT NOT NULL,
+    key               TEXT NOT NULL,
+    value             INTEGER NOT NULL,
+    PRIMARY KEY (symbol, hour, metric, key)
+);
 CREATE TABLE IF NOT EXISTS backfill_files (
     file_name         TEXT PRIMARY KEY,
     dataset           TEXT NOT NULL,
@@ -381,6 +389,40 @@ class StateStore:
             (symbol, hour, digest, ts_us),
         )
 
+    def set_hour_stats(self, symbol: str, hour: int, stats: dict[tuple[str, str], int]) -> None:
+        """Substitui as contagens de uma hora normalizada: (métrica, chave) → valor."""
+        self._db.execute("BEGIN")
+        try:
+            self._db.execute("DELETE FROM hour_stats WHERE symbol = ? AND hour = ?", (symbol, hour))
+            self._db.executemany(
+                "INSERT INTO hour_stats VALUES (?, ?, ?, ?, ?)",
+                [(symbol, hour, metric, key, value) for (metric, key), value in stats.items()],
+            )
+        except BaseException:
+            self._db.execute("ROLLBACK")
+            raise
+        self._db.execute("COMMIT")
+
+    def hour_stats_between(
+        self, symbol: str, start_hour: int, end_hour: int
+    ) -> list[tuple[int, str, str, int]]:
+        """(hora, métrica, chave, valor) das horas em `[start_hour, end_hour)`."""
+        rows = self._db.execute(
+            "SELECT hour, metric, key, value FROM hour_stats"
+            " WHERE symbol = ? AND hour >= ? AND hour < ? ORDER BY hour",
+            (symbol, start_hour, end_hour),
+        )
+        return [(row[0], row[1], row[2], row[3]) for row in rows]
+
+    def clock_samples_between(self, start_ts_us: int, end_ts_us: int) -> list[tuple[int, int, int]]:
+        """(local_ts_us, offset_us, rtt_us) das medições em `[start, end)`."""
+        rows = self._db.execute(
+            "SELECT local_ts_us, offset_us, rtt_us FROM clock_offsets"
+            " WHERE local_ts_us >= ? AND local_ts_us < ? ORDER BY local_ts_us",
+            (start_ts_us, end_ts_us),
+        )
+        return [(row[0], row[1], row[2]) for row in rows]
+
     def backfill_status(self, file_name: str) -> str | None:
         row = self._db.execute(
             "SELECT status FROM backfill_files WHERE file_name = ?", (file_name,)
@@ -409,7 +451,7 @@ class StateStore:
 
     def table_rows(self, table: str) -> tuple[list[str], list[tuple[object, ...]]]:
         """Colunas e linhas de uma tabela operacional, para exportação (doc 06 §5.4)."""
-        if table not in {"sessions", "gaps", "clock_offsets", "backfill_files"}:
+        if table not in {"sessions", "gaps", "clock_offsets", "backfill_files", "hour_stats"}:
             raise ValueError(f"tabela não exportável: {table}")
         cursor = self._db.execute(f"SELECT * FROM {table}")
         return [d[0] for d in cursor.description], cursor.fetchall()
