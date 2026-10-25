@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.11 — rascunho |
+| Versão | 0.12 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -461,6 +461,9 @@ No host, máscara e camada normalizada ficam só 7 dias no disco (§6.2). Para p
 | `quality_hourly.csv` | Minutos `ok`, `recovered`, `missing` e outros, por hora e canal, segundo a máscara |
 | `delays_hourly.csv` | Atraso do negócio ao recebimento por hora: quantidade, p50 e p99, em ms |
 | `gaps.csv` | Lacunas registradas, com causa, status, início, duração e origem da recuperação |
+| `highlights.csv` | Destaques em linguagem leiga (`metric`, `value`, `detail`): mensagens recebidas por canal e por segundo; dinheiro negociado na coleta; maior negócio; segundo com mais negócios; atraso mediano e p99; bytes recebidos e guardados; contagens do histórico importado (negócios, candles, dias); tamanho e número de objetos do bucket |
+
+As mensagens recebidas são contadas linha a linha nos arquivos brutos do S3; a contagem de cada arquivo fica no cache junto com o ETag, então uma atualização só lê os arquivos novos. Sem réplica, conta os brutos que estão no disco local. O histórico importado entra só como contagem de linhas e de arquivos (`backfill_files`), nunca como preço ou volume.
 
 Só entram dados da coleta ao vivo: os arquivos de backfill (`archive.parquet`) e qualquer período anterior ao início da coleta ficam de fora, o que mantém o holdout da trilha A do doc 04 sem consulta. O comando não publica nada; o painel é atualizado a partir dos arquivos gerados.
 
@@ -577,3 +580,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.9 | 24/10/2026 | §8.3: relatório de qualidade (CA-05); datasets operacionais `hour_stats` e `backfill_files` em §5.4. |
 | 0.10 | 24/10/2026 | §9.1: funcionamento da recuperação de lacunas (canais brutos `rest:klines` e `archive:trades`, status, falhas). |
 | 0.11 | 25/10/2026 | §8.4: dados do painel da coleta (`trader dashboard-data`). |
+| 0.12 | 25/10/2026 | §8.4: tabela de destaques do painel (`highlights.csv`). |

@@ -309,7 +309,10 @@ def dashboard_data(config: PipelineConfig, out_dir: Path) -> int:
 
         client = boto3.session.Session(region_name=config.aws_region).client("s3")
         synced = sync_from_s3(client, config.replica_s3_bucket, config.data_dir, config.symbol)
-        print(f"S3: {synced.downloaded} arquivo(s) baixado(s), {synced.unchanged} sem mudança")
+        print(
+            f"S3: {synced.downloaded} arquivo(s) baixado(s), {synced.unchanged} sem mudança,"
+            f" {synced.raw_counted} arquivo(s) bruto(s) contado(s)"
+        )
     try:
         report = export(config.data_dir, out_dir, config.symbol)
     except ValueError as exc:
