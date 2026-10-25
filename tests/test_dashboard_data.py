@@ -38,6 +38,7 @@ def test_export_from_pipeline_output(tmp_path: Path) -> None:
     minutes = {r["minute"]: r for r in read_csv(tmp_path / "out/minutes.csv")}
     row = minutes["2026-10-23T14:00:00Z"]
     assert float(row["close"]) == 81524.01
+    assert (float(row["open"]), float(row["high"]), float(row["low"])) == (81520, 81530, 81510)
     assert int(row["trades"]) == 10
     assert float(row["buy_volume"]) == 0.0008  # comprador agressor (m = false)
     assert int(row["snapshots"]) == 2

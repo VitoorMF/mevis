@@ -456,7 +456,7 @@ No host, máscara e camada normalizada ficam só 7 dias no disco (§6.2). Para p
 
 | Arquivo | Conteúdo |
 |---|---|
-| `minutes.csv` | Por minuto desde o primeiro minuto completo da coleta: fechamento, volume, volume por lado do agressor, negócios, fotos do livro, spread em pontos-base e desequilíbrio do livro (top 20 e 1º nível), em média no minuto |
+| `minutes.csv` | Por minuto desde o primeiro minuto completo da coleta: abertura, máxima, mínima, fechamento, volume, volume por lado do agressor, negócios, fotos do livro, spread em pontos-base e desequilíbrio do livro (top 20 e 1º nível), em média no minuto |
 | `book_snapshot.csv` | Os 20 níveis de cada lado da última foto do livro |
 | `quality_hourly.csv` | Minutos `ok`, `recovered`, `missing` e outros, por hora e canal, segundo a máscara |
 | `delays_hourly.csv` | Atraso do negócio ao recebimento por hora: quantidade, p50 e p99, em ms |

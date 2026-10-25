@@ -176,8 +176,8 @@ def export(data_dir: Path, out_dir: Path, symbol: str) -> ExportReport:
     last_book = _book(data_dir, symbol, first_minute, minutes)
 
     columns = [
-        "minute", "close", "volume", "buy_volume", "sell_volume", "trades", "snapshots",
-        "spread_bps", "imbalance_top20", "imbalance_level1",
+        "minute", "open", "high", "low", "close", "volume", "buy_volume", "sell_volume", "trades",
+        "snapshots", "spread_bps", "imbalance_top20", "imbalance_level1",
     ]  # fmt: skip
     rows = []
     for minute in sorted(minutes):
@@ -185,7 +185,8 @@ def export(data_dir: Path, out_dir: Path, symbol: str) -> ExportReport:
         if "close" not in d:
             continue  # minuto ainda sem candle fechado
         rows.append([
-            _iso(minute), d["close"], round(d["volume"], 5), round(d.get("buy", 0.0), 5),
+            _iso(minute), d["open"], d["high"], d["low"], d["close"], round(d["volume"], 5),
+            round(d.get("buy", 0.0), 5),
             round(d.get("sell", 0.0), 5), int(d.get("trades", 0)), int(d.get("snapshots", 0)),
             _round(d.get("spread_bps"), 4), _round(d.get("imb20"), 4), _round(d.get("imb1"), 4),
         ])  # fmt: skip
@@ -370,12 +371,19 @@ def _history(data_dir: Path) -> dict[str, tuple[int, int, str, str]]:
 
 def _klines(data_dir: Path, symbol: str, first: int, minutes: dict[int, dict[str, float]]) -> None:
     for path in _hourly(data_dir, "normalized/klines_1m", symbol):
-        table = pq.read_table(path, columns=["open_ts_us", "close", "volume"])
-        for open_ts, close, volume in zip(
-            *(table[c].to_pylist() for c in table.column_names), strict=True
+        columns = ["open_ts_us", "open", "high", "low", "close", "volume"]
+        table = pq.read_table(path, columns=columns)
+        for open_ts, o, h, low, c, volume in zip(
+            *(table[name].to_pylist() for name in columns), strict=True
         ):
             if open_ts >= first:
-                minutes[open_ts].update(close=float(close), volume=float(volume))
+                minutes[open_ts].update(
+                    open=float(o),
+                    high=float(h),
+                    low=float(low),
+                    close=float(c),
+                    volume=float(volume),
+                )
 
 
 def _trades(
