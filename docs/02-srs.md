@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 02 — SRS |
-| Versão | 0.5 — rascunho |
+| Versão | 0.6 — rascunho |
 | Escopo desta versão | **V0.1 (Data Engine) detalhada.** V0.2 e V0.3 apenas delimitadas (§9), a detalhar depois dos docs 04 e 05. |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -390,8 +390,8 @@ Regras que valem para o produto inteiro, já decididas no PRD. A coluna "Desde" 
   3. Ao reconectar, abre nova sessão e reassina os streams.
   4. Calcula, por stream, o intervalo sem dados e registra as lacunas.
   5. Aciona a recuperação aplicável (UC-05).
-- **Fluxos alternativos:** 2a. Falhas consecutivas acima de N → alerta (UC-08). 2b. Limite de tentativas por IP próximo → aguarda.
-- **Pós-condição:** coleta retomada; lacunas registradas e em recuperação.
+- **Fluxos alternativos:** 1a. Silêncio acima do limite em parte dos streams, com o socket ainda ativo → o sistema abre a nova sessão **antes** de encerrar a antiga, como na rotação (UC-03): a antiga continua gravando os streams que ainda chegam até a nova receber todos, ou até o prazo de troca; aí a nova assume e a antiga é encerrada. Se a nova sessão não abrir, segue o fluxo principal. 2a. Falhas consecutivas acima de N → alerta (UC-08). 2b. Limite de tentativas por IP próximo → aguarda.
+- **Pós-condição:** coleta retomada; lacunas registradas e em recuperação; com o socket ativo, nenhum stream que ainda chegava perde dados na troca.
 - **Requisitos:** RF-111–RF-119, RF-157, RF-163, RNF-002.
 
 ### UC-03 — Rotação planejada de conexão
@@ -555,3 +555,4 @@ Nenhuma pendência aberta que afete a V0.1. Resolvidas em 23/10/2026: PD-06 → 
 | 0.3 | 23/10/2026 | Ambiente operacional alinhado ao doc 03 (Tóquio, Amazon Linux 2023 ARM64); RNF-009 e PD-13 referenciam as propostas do doc 03. |
 | 0.4 | 23/10/2026 | PD-13 resolvida (DEC-24). |
 | 0.5 | 23/10/2026 | Ambiente operacional na us-east-2 (DEC-26). Na produção, RF-146 recorre ao arquivo diário, porque `historicalTrades` responde 451 de lá (doc 06 MD-18). |
+| 0.6 | 25/10/2026 | UC-02, fluxo 1a: com o socket ativo, o silêncio de parte dos streams abre a nova sessão antes de encerrar a antiga. |

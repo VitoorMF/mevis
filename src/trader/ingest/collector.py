@@ -203,7 +203,7 @@ class Collector:
             now = self._clock.mono_us()
             silent = self._silence.silent(now)
             if silent:
-                await self._lose_primary(primary, "silence:" + ",".join(silent))
+                await self._replace_silent(primary, silent, stop)
                 continue
             if now >= primary.rotate_at_mono_us:
                 await self._rotate(primary, stop)
@@ -232,10 +232,32 @@ class Collector:
         )
 
     async def _rotate(self, old: _Session, stop: asyncio.Event) -> None:
+        if not await self._handover(old, stop, "rotation", force=False):
+            old.rotate_at_mono_us = self._clock.mono_us() + ROTATION_RETRY_US
+
+    async def _replace_silent(self, old: _Session, silent: list[str], stop: asyncio.Event) -> None:
+        """Canal sem mensagens com a conexão ativa: a sessão nova abre antes de a antiga fechar,
+        para os canais que ainda chegam não ficarem sem gravação (doc 03 §6.2)."""
+        reason = "silence:" + ",".join(silent)
+        log.warning(
+            "canal sem mensagens; abrindo sessão nova",
+            extra=ctx(session=old.session_id, reason=reason),
+        )
+        if await self._handover(old, stop, reason, force=True):
+            self._reconnects += 1
+        elif not stop.is_set():
+            await self._lose_primary(old, reason)
+
+    async def _handover(
+        self, old: _Session, stop: asyncio.Event, reason: str, *, force: bool
+    ) -> bool:
+        """Troca a sessão primária sem lacuna; devolve False se a antiga continua (ou se parou).
+
+        `force`: a nova assume ao fim do prazo mesmo sem ter recebido todos os canais, porque a
+        antiga também não está recebendo (silêncio)."""
         new = await self._open_session()
         if new is None:
-            old.rotate_at_mono_us = self._clock.mono_us() + ROTATION_RETRY_US
-            return
+            return False
         new.warming = True
         assert new.task is not None and old.task is not None
         ready = asyncio.create_task(new.ready.wait())
@@ -246,22 +268,23 @@ class Collector:
         finally:
             ready.cancel()
         if stop.is_set():
-            return
+            return False
         old_alive = not old.task.done()
         if old_alive and new.ready.is_set() and not new.task.done():
             # Sobreposição: garante que a sessão antiga já processou o que a nova tem no buffer.
             await self._wait_any(stop, new.task, timeout_s=self._config.handover_overlap_s)
             if stop.is_set():
-                return
-        if new.task.done() or (old_alive and not new.ready.is_set()):
-            log.warning("rotação adiada", extra=ctx(session=new.session_id))
+                return False
+        if new.task.done() or (old_alive and not new.ready.is_set() and not force):
+            log.warning("troca adiada", extra=ctx(session=new.session_id, reason=reason))
             await self._close_session(new, new.close_reason or "handover_timeout")
-            old.rotate_at_mono_us = self._clock.mono_us() + ROTATION_RETRY_US
-            return
-        # Nova sessão pronta, ou a antiga morreu durante o aquecimento: a nova assume.
+            return False
+        # Nova sessão pronta, a antiga morreu durante o aquecimento ou a troca é forçada.
         self._promote(new)
-        reason = "rotation" if not old.task.done() else (old.close_reason or "ended")
-        await self._close_session(old, reason)
+        await self._close_session(
+            old, reason if not old.task.done() else (old.close_reason or "ended")
+        )
+        return True
 
     # ------------------------------------------------------------------ sessões
 

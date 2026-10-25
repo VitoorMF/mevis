@@ -220,3 +220,33 @@ def test_new_instance_during_handover_does_not_report_false_gaps(tmp_path: Path)
 
     run = asyncio.run(main())
     assert run.gaps() == []
+
+
+def test_silence_with_live_connection_opens_new_session_first(tmp_path: Path) -> None:
+    """Doc 03 §6.2: um canal parado numa conexão ainda ativa troca de sessão sem lacuna nos
+    outros canais, porque a sessão nova abre antes de a antiga fechar."""
+    limits = {"trade": 5.0, "kline_1m": 1.0, "depth20@100ms": 1.0, "depth@100ms": 1.0}
+
+    async def main() -> Run:
+        async with FakeMarket() as market:
+
+            async def scenario(run: Run) -> None:
+                await run.flowing()
+                market.stall_current("btcusdt@kline_1m")
+                await run.eventually(
+                    lambda: any(
+                        s.close_reason == "silence:btcusdt@kline_1m" for s in run.state.sessions()
+                    )
+                )
+
+            config = fast_config(tmp_path, market.url, silence_limits_s=limits)
+            return await collect_while(config, FakeRest(), scenario)
+
+    run = asyncio.run(main())
+    sessions = run.state.sessions()
+    old = next(s for s in sessions if s.close_reason == "silence:btcusdt@kline_1m")
+    new = next(s for s in sessions if s.opened_ts_us > old.opened_ts_us)
+    assert old.closed_ts_us is not None and new.opened_ts_us < old.closed_ts_us
+    assert run.gaps("btcusdt@depth20@100ms") == []
+    assert run.gaps("btcusdt@depth@100ms") == []
+    assert run.gaps("btcusdt@trade") == []

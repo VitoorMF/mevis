@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.11 — rascunho |
+| Versão | 0.12 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -191,6 +191,8 @@ trader/
 4. As duas sessões gravam em arquivos separados durante a sobreposição; a deduplicação dos dados acontece na normalização.
 
 Se a nova sessão falhar ou não ficar pronta em 60 s, a rotação é adiada em 1 minuto. Se a antiga morrer durante o aquecimento, a nova assume imediatamente.
+
+**Canal sem mensagens com a conexão ativa** (silêncio acima do limite, RF-111): a mesma troca, disparada pelo silêncio. A sessão antiga continua gravando os canais que ainda chegam enquanto a nova aquece; quando a nova recebe todos os canais (ou o prazo de 60 s acaba, porque a falta pode ser da própria Binance), a nova assume e a antiga é fechada com o motivo do silêncio. Só quando a conexão caiu de vez, ou a nova não abre, o coletor fecha antes de reconectar (UC-02). Motivo: em 25/10/2026 um silêncio de negócios e candles fez o coletor fechar a conexão, e o livro, que ainda chegava, ficou 5,6 s sem gravação.
 
 ### 6.3 Pipeline horário (ADR-04)
 
@@ -424,6 +426,7 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | Falha | Detecção | Resposta | Perda máxima |
 |---|---|---|---|
 | Queda do WebSocket | Coletor | Reconexão com espera exponencial (UC-02) | Segundos; lacuna registrada |
+| Canal sem mensagens, conexão ativa | Coletor (silêncio, RF-111) | Sessão nova antes de fechar a antiga (§6.2) | Só o canal silencioso; os outros seguem gravando |
 | Coletor trava ou morre | `systemd`; `Heartbeat` | Reinício automático; alarme | Segundos |
 | Pipeline falha | Código de saída; `ReplicationLagMinutes` | Próxima execução retoma (idempotente) | Nenhuma (dados no disco) |
 | Host travado | `StatusCheckFailed_Instance` | Reinicialização automática | Minutos |
@@ -499,3 +502,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.9 | 24/10/2026 | §5: relatório de qualidade no pacote `pipeline`. |
 | 0.10 | 24/10/2026 | §4 e §6.4: recuperação de lacunas como etapa do pipeline horário, no lugar dos timers `trader-recovery` e `trader-archive`. |
 | 0.11 | 25/10/2026 | §5: dados do painel da coleta no pacote `pipeline`. |
+| 0.12 | 25/10/2026 | §6.2 e §11: silêncio de canal com a conexão ativa troca de sessão sem fechar a antiga antes (abre a nova primeiro). |

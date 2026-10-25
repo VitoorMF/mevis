@@ -60,6 +60,8 @@ class FakeMarket:
         self.update_id = 50_000
         self.connections = 0
         self.paused: set[str] = set()
+        self.stalled: dict[ServerConnection, set[str]] = {}
+        """Streams parados só para as conexões que já existiam (a nova recebe tudo)."""
         self.clients: set[ServerConnection] = set()
         self.url = ""
         self._server: Server | None = None
@@ -78,6 +80,10 @@ class FakeMarket:
         await asyncio.gather(self._ticker, return_exceptions=True)
         self._server.close()
         await self._server.wait_closed()
+
+    def stall_current(self, stream: str) -> None:
+        for ws in self.clients:
+            self.stalled.setdefault(ws, set()).add(stream)
 
     def skip_trades(self, count: int) -> None:
         self.trade_id += count
@@ -141,6 +147,8 @@ class FakeMarket:
                 continue
             text = json.dumps({"stream": stream, "data": data}, separators=(",", ":"))
             for ws in list(self.clients):
+                if stream in self.stalled.get(ws, ()):
+                    continue
                 with contextlib.suppress(ConnectionClosed):
                     await ws.send(text)
 
