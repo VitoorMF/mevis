@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.10 — rascunho |
+| Versão | 0.11 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -450,6 +450,20 @@ Se mais de um estado se aplica ao minuto, prevalece o pior. A pesquisa (V0.2) e 
 
 No host, máscara e camada normalizada ficam só 7 dias no disco (§6.2). Para períodos mais antigos, o relatório roda sobre uma cópia: `derived/` e `normalized/` baixados do S3 e o estado de `ops/state-backup.db`. Dias importados pelo backfill não têm máscara nem horário de recebimento e ficam fora do relatório (§7, item 10).
 
+### 8.4 Dados do painel da coleta
+
+`trader dashboard-data --out <diretório> [--config <toml>] [--data-dir <cache>]` gera as tabelas do painel visual da coleta ao vivo. Com `replica_s3_bucket` na configuração, primeiro baixa do S3 para o cache local só o que mudou (comparando o ETag de cada objeto): os arquivos horários de `normalized/trades`, `normalized/klines_1m`, `normalized/book_top20` e `derived/quality_mask` desde o início da coleta, e a cópia do estado (`ops/state-backup.db`). Sem réplica configurada, lê o diretório de dados como está.
+
+| Arquivo | Conteúdo |
+|---|---|
+| `minutes.csv` | Por minuto desde o primeiro minuto completo da coleta: fechamento, volume, volume por lado do agressor, negócios, fotos do livro, spread em pontos-base e desequilíbrio do livro (top 20 e 1º nível), em média no minuto |
+| `book_snapshot.csv` | Os 20 níveis de cada lado da última foto do livro |
+| `quality_hourly.csv` | Minutos `ok`, `recovered`, `missing` e outros, por hora e canal, segundo a máscara |
+| `delays_hourly.csv` | Atraso do negócio ao recebimento por hora: quantidade, p50 e p99, em ms |
+| `gaps.csv` | Lacunas registradas, com causa, status, início, duração e origem da recuperação |
+
+Só entram dados da coleta ao vivo: os arquivos de backfill (`archive.parquet`) e qualquer período anterior ao início da coleta ficam de fora, o que mantém o holdout da trilha A do doc 04 sem consulta. O comando não publica nada; o painel é atualizado a partir dos arquivos gerados.
+
 ---
 
 ## 9. Recuperação de falhas por canal
@@ -562,3 +576,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.8 | 24/10/2026 | §7: MD-26 (candles importados no host) e carga de negócios no MacBook; pendência de onde rodar resolvida; MD-27 com o resultado da carga de negócios. |
 | 0.9 | 24/10/2026 | §8.3: relatório de qualidade (CA-05); datasets operacionais `hour_stats` e `backfill_files` em §5.4. |
 | 0.10 | 24/10/2026 | §9.1: funcionamento da recuperação de lacunas (canais brutos `rest:klines` e `archive:trades`, status, falhas). |
+| 0.11 | 25/10/2026 | §8.4: dados do painel da coleta (`trader dashboard-data`). |

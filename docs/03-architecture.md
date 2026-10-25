@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.10 — rascunho |
+| Versão | 0.11 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -155,7 +155,7 @@ trader/
   recovery/    estratégias de recuperação por canal
   pipeline/    rodada horária: órfãos, compressão, normalização por hora, máscara, exportações,
                réplica e retenção; backfill dos arquivos públicos (doc 06 §7);
-               relatório de qualidade (doc 06 §8.3)
+               relatório de qualidade (doc 06 §8.3); dados do painel da coleta (doc 06 §8.4)
   ops/         configuração, logs estruturados, StatsD, saúde, estado SQLite
   cli/         comandos
 ```
@@ -498,3 +498,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.8 | 24/10/2026 | §9.2: correção manual das lacunas falsas da primeira troca; §5: `botocore[crt]` no MacBook. |
 | 0.9 | 24/10/2026 | §5: relatório de qualidade no pacote `pipeline`. |
 | 0.10 | 24/10/2026 | §4 e §6.4: recuperação de lacunas como etapa do pipeline horário, no lugar dos timers `trader-recovery` e `trader-archive`. |
+| 0.11 | 25/10/2026 | §5: dados do painel da coleta no pacote `pipeline`. |

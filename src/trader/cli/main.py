@@ -1,5 +1,5 @@
-"""Linha de comando: `collect`, `status`, `pipeline`, `backfill`, `quality` e `smoke` (RF-181 a
-RF-185)."""
+"""Linha de comando: `collect`, `status`, `pipeline`, `backfill`, `quality`, `dashboard-data` e
+`smoke` (RF-181 a RF-185)."""
 
 import argparse
 import asyncio
@@ -31,6 +31,7 @@ from trader.ops.metrics import Metrics, NullMetrics, StatsdMetrics
 from trader.ops.smoke import run_smoke
 from trader.ops.state import StateStore
 from trader.pipeline.backfill import Backfill, BackfillBusy, BackfillReport
+from trader.pipeline.dashboard_data import export, sync_from_s3
 from trader.pipeline.hourly import HourlyPipeline, PipelineBusy
 from trader.pipeline.quality_report import build_report
 from trader.recovery.gaps import GapRecovery
@@ -87,13 +88,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     quality.add_argument("--end", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
     quality.add_argument("--json", type=Path, help="grava também o relatório em JSON")
 
+    dashboard = commands.add_parser(
+        "dashboard-data", help="gera as tabelas do painel da coleta (doc 06 §8.4)"
+    )
+    dashboard.add_argument(
+        "--config", type=Path, help="TOML com replica_s3_bucket para baixar do S3"
+    )
+    dashboard.add_argument("--data-dir", type=Path, help="cache local (com S3) ou dados do host")
+    dashboard.add_argument("--out", type=Path, required=True, help="diretório dos CSVs")
+
     smoke = commands.add_parser("smoke", help="testa a conectividade com a Binance (doc 03 §9.4)")
     smoke.add_argument("--config", type=Path)
     smoke.add_argument("--duration", type=float, default=600.0, help="segundos de WebSocket")
 
     args = parser.parse_args(argv)
     try:
-        if args.command in ("pipeline", "backfill", "quality"):
+        if args.command in ("pipeline", "backfill", "quality", "dashboard-data"):
             pipeline_config = load_pipeline_config(
                 args.config,
                 data_dir=args.data_dir,
@@ -116,6 +126,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_backfill(pipeline_config, args.dataset, args.start, args.end)
     if args.command == "quality":
         return quality_report(pipeline_config, args.start, args.end, args.json)
+    if args.command == "dashboard-data":
+        return dashboard_data(pipeline_config, args.out)
     if args.command == "collect":
         configure_logging(args.log_level)
         asyncio.run(run_collector(config, args.duration))
@@ -288,6 +300,24 @@ def quality_report(config: PipelineConfig, start: date, end: date, json_path: Pa
     print("\n".join(report.lines()))
     if json_path is not None:
         json_path.write_text(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+    return 0
+
+
+def dashboard_data(config: PipelineConfig, out_dir: Path) -> int:
+    if config.replica_s3_bucket:
+        import boto3  # só o pipeline e a CLI usam o SDK da AWS (ADR-03)
+
+        client = boto3.session.Session(region_name=config.aws_region).client("s3")
+        synced = sync_from_s3(client, config.replica_s3_bucket, config.data_dir, config.symbol)
+        print(f"S3: {synced.downloaded} arquivo(s) baixado(s), {synced.unchanged} sem mudança")
+    try:
+        report = export(config.data_dir, out_dir, config.symbol)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"coleta desde {report.collection_start}")
+    for name, count in report.rows.items():
+        print(f"  {name}: {count} linha(s)")
     return 0
 
 
