@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.13 — rascunho |
+| Versão | 0.14 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -48,7 +48,7 @@ Preços foram consultados na AWS Price List API em 23/10/2026 (região us-east-2
 | ADR-10 | Estado do Terraform no S3, com bloqueio nativo, criado por uma configuração de *bootstrap* separada. | §7.6 |
 | ADR-11 | (Preliminar) O Trading Engine da V0.3 terá conexão de mercado própria, sem depender do coletor. | §13 |
 | ADR-12 | Alertas por e-mail via SNS (resolve PD-13). | §7.5 |
-| ADR-13 | Página pública de status só operacional: bucket separado, lido só pelo CloudFront (OAC), com um JSON gravado pelo servidor a cada 15 s; nenhum dado de mercado (aprovada em 25/10/2026). | §7.7 |
+| ADR-13 | Página pública de status só operacional: bucket separado, lido só pelo CloudFront (OAC), com um JSON gravado pelo servidor a cada 40 s; nenhum dado de mercado (aprovada em 25/10/2026; intervalo de 15 s para 40 s em 26/10/2026). | §7.7 |
 
 ---
 
@@ -302,13 +302,13 @@ A recuperação é a primeira etapa do pipeline horário. Ela lê as lacunas abe
 Página para mostrar o projeto (LinkedIn, portfólio) com a saúde da coleta em tempo real, **sem nenhum dado de mercado** (doc 06 §8.5).
 
 ```text
-trader-status (serviço no host: `trader status-publisher`, a cada 15 s)
+trader-status (serviço no host: `trader status-publisher`, a cada 40 s)
   lê health/, state.db (só leitura), máscara e camada normalizada locais
   └─► s3://trader-public-<conta>-<região>/status.json    (Cache-Control 10 s)
       s3://…/history.json   (conferido a cada 5 min, gravado só quando muda: ~1 vez por hora)
       s3://…/index.html     (ao iniciar; o trader-deploy reinicia o serviço a cada versão)
                      ▲
-   CloudFront (OAC) ─┘ ─► https://<id>.cloudfront.net  (o navegador busca status.json a cada 15 s)
+   CloudFront (OAC) ─┘ ─► https://<id>.cloudfront.net  (o navegador busca status.json a cada 40 s)
 ```
 
 - **Contagens ao vivo:** o arquivo de saúde de cada instância do coletor traz as mensagens por sessão aberta (`session_messages`); o total desde o início soma as sessões fechadas (`state.db`) e as abertas. As taxas por canal vêm da diferença entre duas leituras da mesma instância; na troca a/b vale a maior das duas, para não contar em dobro.
@@ -320,7 +320,7 @@ trader-status (serviço no host: `trader status-publisher`, a cada 15 s)
 - **Permissão mínima:** o papel da instância ganha `s3:PutObject` só nesse bucket, sem leitura nem exclusão.
 - **Serviço separado do coletor** (ADR-03): o `trader-status` usa o SDK da AWS; o coletor continua sem ele.
 - **Sem identificadores** na página: nada de ID da conta, nome de bucket, ID da instância ou IP.
-- **Custo** (§10.1): ~173 mil gravações por mês no S3 (≈ US$ 0,86); CloudFront dentro da franquia gratuita (1 TB e 10 milhões de requisições por mês) [A VERIFICAR no plano gratuito]; armazenamento de poucos KB.
+- **Custo** (§10.1): ~65 mil gravações por mês no S3 (≈ US$ 0,33); CloudFront dentro da franquia gratuita (1 TB e 10 milhões de requisições por mês) [A VERIFICAR no plano gratuito]; armazenamento de poucos KB.
 
 ### 7.6 Terraform (DEC-22, ADR-10)
 
@@ -533,3 +533,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.11 | 25/10/2026 | §5: dados do painel da coleta no pacote `pipeline`. |
 | 0.12 | 25/10/2026 | §6.2 e §11: silêncio de canal com a conexão ativa troca de sessão sem fechar a antiga antes (abre a nova primeiro). |
 | 0.13 | 25/10/2026 | ADR-13 e §7.7: página pública de status só operacional, servida pelo CloudFront; §5 inclui `public/` e o publicador; §7.6 inclui o módulo `public_status`. |
+| 0.14 | 26/10/2026 | ADR-13 e §7.7: a página pública passa a ser atualizada a cada 40 s (antes 15 s); custo das gravações ≈ US$ 0,33/mês. |

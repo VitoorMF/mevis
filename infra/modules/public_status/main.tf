@@ -1,6 +1,6 @@
 # Página pública de status (doc 03 §7.7, ADR-13): bucket próprio, fechado, lido só pelo
 # CloudFront via OAC. O servidor grava nele (permissão no módulo collector_host); o público
-# acessa só pelo endereço do CloudFront. Sem versionamento: o status.json é regravado a cada 15 s.
+# acessa só pelo endereço do CloudFront. Sem versionamento: o status.json é regravado a cada 40 s.
 
 resource "aws_s3_bucket" "this" {
   bucket = var.bucket_name

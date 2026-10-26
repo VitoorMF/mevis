@@ -69,7 +69,7 @@ Nenhum `apply` sem revisar o `plan` (RN-012).
 | Pipeline manual | `sudo systemctl start trader-pipeline.service` |
 | Backfill (doc 06 §7) | `sudo systemd-run --unit trader-backfill-<dataset> --uid trader --gid trader -p MemoryMax=700M -p CPUQuota=25% -p Nice=19 -E HOME=/var/lib/trader /opt/trader/current/bin/trader backfill --config /etc/trader/trader.toml --dataset <dataset> --start <AAAA-MM-DD> --end <AAAA-MM-DD>`; acompanhar com `journalctl -u trader-backfill-<dataset>`. O `CPUQuota` de 25% fica abaixo do que o t4g.small acumula de créditos de CPU (modo `standard`). |
 
-Mudanças no script de inicialização (`user_data`) não recriam a instância (`ignore_changes`): aplicar no host pelo SSM ou recriar o host de propósito. A instância tem proteção contra encerramento, e o bucket de dados tem `prevent_destroy`; o da página pública não, porque o conteúdo é regravado a cada 15 s.
+Mudanças no script de inicialização (`user_data`) não recriam a instância (`ignore_changes`): aplicar no host pelo SSM ou recriar o host de propósito. A instância tem proteção contra encerramento, e o bucket de dados tem `prevent_destroy`; o da página pública não, porque o conteúdo é regravado a cada 40 s.
 
 ## Custos (doc 03 §10)
 

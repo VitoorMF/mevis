@@ -406,7 +406,7 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; j
 
   <footer>
     <span>Dados de mercado: Binance. Esta página mostra apenas métricas do sistema de coleta.</span>
-    <span>Atualiza sozinha a cada 15 s · horários no seu fuso</span>
+    <span><span id="cadence">Atualiza sozinha a cada 40 s</span> · horários no seu fuso</span>
   </footer>
 </main>
 
@@ -454,7 +454,9 @@ function el(tag, attrs, ...kids) {
 }
 const serverNow = () => Date.now() + serverOffsetMs;
 const dataAgeS = () => status ? (serverNow() - status.generated_at_us / 1000) / 1000 : Infinity;
-const isLive = () => !!status && status.collector.state === "running" && dataAgeS() < 90;
+const interval = () => (status && status.interval_s) || 40;
+const staleAfterS = () => Math.max(90, 3 * interval());
+const isLive = () => !!status && status.collector.state === "running" && dataAgeS() < staleAfterS();
 
 function bytes(n) {
   if (n == null) return "—";
@@ -503,7 +505,7 @@ async function loadStatus() {
   try {
     status = await fetchJson("status.json");
     renderStatus();
-    next = Math.min(30, Math.max(4, status.interval_s - dataAgeS() + 3));
+    next = Math.min(interval() + 5, Math.max(4, interval() - dataAgeS() + 3));
   } catch (err) {
     showOffline();
     next = 10;
@@ -538,8 +540,16 @@ function renderStatus() {
   if (s.collection_start_us) $("since").textContent = dtf.format(new Date(s.collection_start_us / 1000));
   $("rate").textContent = s.messages.rate == null ? "—" : nf1.format(s.messages.rate);
   if (!shown) shown = s.messages.received;
-  const recent = (s.series || []).filter((p) => p.t / 1000 > s.generated_at_us / 1000 - 60000 && p.total != null);
-  $("last-minute").textContent = recent.length ? nf.format(Math.round(recent.reduce((a, p) => a + p.total, 0) * s.interval_s)) : "—";
+  // cada ponto da série cobre o intervalo anterior a ele; soma a parte dentro do último minuto
+  const end = s.generated_at_us / 1000, from = end - 60000;
+  let lastMinute = 0, covered = 0;
+  for (const p of s.series || []) {
+    if (p.total == null) continue;
+    const t = p.t / 1000, overlap = Math.max(0, Math.min(t, end) - Math.max(t - interval() * 1000, from));
+    lastMinute += p.total * overlap / 1000; covered += overlap;
+  }
+  $("last-minute").textContent = covered >= 50000 ? nf.format(Math.round(lastMinute * 60000 / covered)) : "—";
+  $("cadence").textContent = "Atualiza sozinha a cada " + nf.format(interval()) + " s";
 
   for (const c of s.channels) {
     const els = channelEls[c.id] || buildChannel(c.id);
@@ -590,7 +600,7 @@ function compression() {
 function updateState() {
   const s = status, box = $("state"), age = dataAgeS();
   let state = s.collector.state, text = "Ao vivo";
-  if (age > 90) { state = "stale"; text = "Sem atualização"; }
+  if (age > staleAfterS()) { state = "stale"; text = "Sem atualização"; }
   else if (state === "stale") text = "Coletor sem sinal";
   else if (state === "stopped") text = "Coletor parado";
   else if (state === "unknown") text = "Aguardando coletor";
@@ -691,7 +701,7 @@ function drawLive(nowPerf, dt) {
   const X = (t) => pad.l + (t - t0) / W * (w - pad.l - pad.r);
   const ids = STACK.filter((id) => !live.hidden.has(id));
 
-  const pts = live.pts.filter((p) => p.t >= t0 - 30000).map((p) => ({ t: p.t, v: pointValues(p, nowPerf), real: true }));
+  const pts = live.pts.filter((p) => p.t >= t0 - 2 * interval() * 1000).map((p) => ({ t: p.t, v: pointValues(p, nowPerf), real: true }));
   if (pts.length && isLive()) pts.push({ t: now, v: pts[pts.length - 1].v, real: false });
   const stacks = pts.map((p) => {
     let acc = 0; const lo = {}, hi = {};
@@ -1181,7 +1191,7 @@ function tick(now) {
   lastFrame = now;
   if (status) {
     const liveNow = isLive(), rate = liveNow ? status.messages.rate || 0 : 0;
-    const target = status.messages.received + rate * Math.min(Math.max(dataAgeS(), 0), 60);
+    const target = status.messages.received + rate * Math.min(Math.max(dataAgeS(), 0), 2 * interval());
     if (target > shown) shown = target;
     const text = nf.format(Math.floor(shown));
     if (text !== lastShownText) { $("counter").textContent = text; $("mini-counter").textContent = text; lastShownText = text; }
