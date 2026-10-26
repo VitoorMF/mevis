@@ -4,8 +4,8 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 01 — PRD |
-| Versão | 0.9 — rascunho |
-| Status | Decisões até DEC-24; aguardando confirmação da conta AWS e revisão final (§19) |
+| Versão | 0.10 — rascunho |
+| Status | Decisões até DEC-27; aguardando confirmação da conta AWS e revisão final (§19) |
 | Data | 23/10/2026 |
 | Responsável pelo produto | *a preencher* |
 | Fonte | [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -434,7 +434,7 @@ O sucesso é avaliado em três camadas. As metas marcadas **[PROPOSTA]** são va
 
 ### 13.3 Sucesso financeiro experimental
 
-Os critérios abaixo definem se um modelo passa em **G2**. Eles **não** definem se o MVP foi bem-sucedido (PP-08). Os valores finais precisam ser pré-registrados nos docs 04 e 07 antes da avaliação no holdout (PD-07).
+Os critérios abaixo definem se um modelo passa em **G2**. Eles **não** definem se o MVP foi bem-sucedido (PP-08). Os valores finais de G2 estão pré-registrados no doc 04 §10.2 desde 26/10/2026 (DEC-27); a tabela abaixo é a referência que os originou.
 
 | ID | Indicador | Referência inicial [PROPOSTA] |
 |---|---|---|
@@ -562,6 +562,7 @@ O MVP é aceito quando **todos** os critérios abaixo forem atendidos, **indepen
 | DEC-24 | Arquitetura | ADR-01 a ADR-12 do doc 03 aprovadas, incluindo alertas por e-mail via SNS (ADR-12). |
 | DEC-25 | Nome do projeto | **MERIS — Market Evidence & Research Intelligence System**. O pacote Python continua `trader` por enquanto. |
 | DEC-26 | Região AWS | **Ohio (`us-east-2`)**. A conta do projeto (nova experiência da AWS) só aceita essa região, por SCP da organização gerenciada pela AWS. A coleta usa só os endpoints `*.binance.vision`, que respondem dos EUA. Tóquio exigiria passar ao plano pago e ativar os recursos avançados (irreversível) e fica como plano B. Substitui DEC-21. |
+| DEC-27 | Método da V0.2 | Decisões PD-15 a PD-23 do doc 04 §1 (26/10/2026): horizontes de 15 e 60 min; alvo binário líquido de custos; holdout da trilha A de 23/07 a 22/10/2026; holdout da trilha B de 6 semanas coletadas depois do congelamento; latência assumida de 1 s para dados de arquivo; custo base de 0,10% por lado; critérios de G2 (IS-14 a IS-19) pré-registrados no doc 04 §10.2; candles de 2023–2025 como estudo de robustez; agregados por minuto de negócios numa EC2 dedicada e temporária (~US$ 0,60 por execução, créditos). |
 
 Permanecem **em aberto**: as pendências de §17.2.
 
@@ -571,12 +572,11 @@ Permanecem **em aberto**: as pendências de §17.2.
 
 | ID | Questão | Opções | Recomendação | Resolver em | Bloqueia |
 |---|---|---|---|---|---|
-| PD-07 | Critérios quantitativos de G2 e G3. | — | Pré-registrar nos docs 04 e 07, antes de avaliar o holdout. Valores iniciais em §13.3. | Docs 04 e 07 | G2 |
+| PD-07 | Critérios quantitativos de G3 (os de G2 foram pré-registrados no doc 04 §10.2, DEC-27). | — | Pré-registrar no doc 07. | Doc 07 | G3 |
 | PD-08 | Papel da testnet. | (a) paper trading pela testnet; (b) simulador local sobre dados reais. | **(b)** para medir desempenho; testnet apenas para validar integração (PR-02). | Doc 05 | Doc 05 |
 | PD-09 | A V0.3 depende do resultado da V0.2? | — | A construção do motor não depende; a promoção de um modelo para paper trading depende de G2 (§8.3). | Este PRD | Doc 08 |
 | PD-10 | Interface de operação. | (a) CLI, relatórios e logs; (b) painel visual. | (a) no MVP; painel como Could (F-32). | Doc 03 | Nada |
 | PD-11 | Spot × futuros no longo prazo. | — | Adiar para depois do MVP. | Pós-MVP | Nada |
-| PD-15 a PD-23 | Método da V0.2: horizontes, alvo, holdouts das duas trilhas, latência assumida para dados de arquivo, custo base, valores dos critérios de G2, uso dos candles de 2023–2025 e onde gerar os agregados por minuto. | Ver doc 04 §1 | Ver doc 04 §1 | Doc 04 | V0.2 e G2 |
 ### 17.3 Pendências resolvidas
 
 | Pendência | Resolvida em | Resultado |
@@ -592,6 +592,8 @@ Permanecem **em aberto**: as pendências de §17.2.
 | PD-12 | 23/10/2026 | DEC-24 — ADR-01 a ADR-11 do doc 03. |
 | PD-13 | 23/10/2026 | DEC-24 — e-mail via SNS (ADR-12). |
 | PD-01 | 23/10/2026 | DEC-25 — MERIS. |
+| PD-07 (parcial) | 26/10/2026 | DEC-27 — critérios de G2 pré-registrados no doc 04 §10.2; G3 continua em PD-07. |
+| PD-15 a PD-23 | 26/10/2026 | DEC-27 — método da V0.2 (doc 04 §1). |
 
 ---
 
@@ -634,6 +636,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | 0.7 | 23/10/2026 | DEC-25: nome do projeto MERIS — Market Evidence & Research Intelligence System; PD-01 resolvida. |
 | 0.8 | 23/10/2026 | DEC-26: região us-east-2 (substitui DEC-21), após descobrir que a conta só aceita essa região e medir o acesso à Binance a partir dela; PR-12, R-18, RS-09 e DEC-23 revistos. |
 | 0.9 | 24/10/2026 | §17.2: PD-15 a PD-23, decisões de método da V0.2 propostas no doc 04. |
+| 0.10 | 26/10/2026 | DEC-27: PD-15 a PD-23 decididas (método da V0.2, doc 04 §1); critérios de G2 pré-registrados (PD-07 parcial); §13.3 aponta para o doc 04 §10.2. |
 
 ---
 

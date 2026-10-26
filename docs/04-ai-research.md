@@ -4,10 +4,10 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 04 — AI & Quantitative Research |
-| Versão | 0.1 — rascunho |
+| Versão | 0.2 — rascunho |
 | Escopo desta versão | Método de pesquisa da V0.2: dados e períodos, formulação do problema, features, baselines, modelos, validação, custos, métricas, critérios de G2 a pré-registrar, registro de experimentos e plano de trabalho. |
-| Status | Aguardando revisão. Nenhum experimento roda antes da aprovação dos critérios (§3.3, §10.2). |
-| Data | 24/10/2026 |
+| Status | Decisões PD-15 a PD-23 tomadas em 26/10/2026 (§1); critérios de G2 pré-registrados (§10.2). Falta a aprovação do documento como um todo. |
+| Data | 26/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.8; [02 — SRS](02-srs.md) v0.5; [03 — Architecture](03-architecture.md) v0.8; [06 — Data & Integrations](06-data-integrations.md) v0.8 |
 
 ---
@@ -29,21 +29,21 @@ As etiquetas seguem o PRD §0.1. Este documento não presume que exista vantagem
 
 ---
 
-## 1. Decisões pendentes deste documento
+## 1. Decisões deste documento
 
-Resumo do que precisa da aprovação do responsável pelo produto. Cada item é detalhado na seção indicada.
+Decididas pelo responsável pelo produto em 26/10/2026, depois de apresentadas as opções e os trade-offs. Cada item é detalhado na seção indicada.
 
-| ID | Questão | Opções | Recomendação | Seção |
+| ID | Questão | Opções apresentadas | Decisão | Seção |
 |---|---|---|---|---|
-| PD-15 | Horizontes de previsão | (a) um só, 5 min; (b) dois, 15 e 60 min; (c) varredura de 1 a 240 min | **(b)**: horizontes curtos demais ficam abaixo do custo de ida e volta; poucos horizontes limitam testes múltiplos | §4.2 |
-| PD-16 | Formulação do alvo | (a) binário: retorno líquido em H minutos > 0; (b) regressão do retorno; (c) barreiras triplas (alvo, stop, tempo) | **(a)** no MVP; (c) como extensão | §4.3 |
-| PD-17 | Holdout da trilha A (histórico) | (a) últimos 3 meses; (b) últimos 6 meses | **(a)**: 23/07/2026 a 22/10/2026 | §3.3 |
-| PD-18 | Holdout da trilha B (com livro) | (a) 4 semanas coletadas **depois** do congelamento; (b) as últimas 2 semanas já coletadas | **(a)**: o modelo é congelado antes de os dados de prova existirem | §3.3 |
-| PD-19 | Latência assumida para dados de arquivo | (a) 0 s; (b) 1 s após o evento; (c) p99 medido ao vivo | **(b)**, revista para (c) se o p99 medido passar de 1 s | §3.5 |
-| PD-20 | Custo base | (a) 0,10% por lado (taxa padrão); (b) 0,075% (com desconto em BNB) | **(a)**, com cenários de sensibilidade | §9 |
-| PD-21 | Valores dos critérios de G2 | Propostos em §10.2 | Aprovar ou ajustar **antes** de qualquer experimento | §10 |
-| PD-22 | Uso dos candles de 2023 a 2025 | (a) estudo de robustez de H-01 e H-02; (b) dentro do walk-forward oficial | **(a)**: as ablações exigem a mesma janela para todos os degraus | §3.2 |
-| PD-23 | Onde transformar negócios em agregados por minuto | (a) MacBook, lendo do S3 dia a dia; (b) host de produção | **(a)**: ~6 h no Mac contra ~2 dias no host (MD-26, MD-27) | §12 |
+| PD-15 | Horizontes de previsão | (a) um só, 5 min; (b) dois, 15 e 60 min; (c) varredura de 1 a 240 min | **(b) 15 e 60 min** | §4.2 |
+| PD-16 | Formulação do alvo | (a) binário: retorno líquido em H minutos > 0; (b) regressão do retorno; (c) barreiras triplas (alvo, stop, tempo) | **(a)**; (c) como extensão depois do primeiro ciclo | §4.3 |
+| PD-17 | Holdout da trilha A (histórico) | (a) últimos 3 meses; (b) últimos 6 meses | **(a)** 23/07/2026 a 22/10/2026 | §3.3 |
+| PD-18 | Holdout da trilha B (com livro) | (a) 4 semanas coletadas depois do congelamento; (a') 6 semanas depois do congelamento; (b) as últimas 2 semanas já coletadas | **(a') 6 semanas** depois do congelamento: com H = 60 min, 4 semanas comportam no máximo ~670 operações sem sobreposição, e um modelo seletivo pode ficar abaixo das 200 do IS-17 | §3.3 |
+| PD-19 | Latência assumida para dados de arquivo | (a) 0 s; (b) 1 s após o evento; (c) p99 medido ao vivo | **(b) 1 s**, revista para (c) se o p99 medido passar de 1 s | §3.5 |
+| PD-20 | Custo base | (a) 0,10% por lado (taxa padrão); (b) 0,075% (com desconto em BNB) | **(a) 0,10%**, com cenários de sensibilidade | §9 |
+| PD-21 | Valores dos critérios de G2 | Propostos em §10.2 | **Aprovados como propostos** e pré-registrados | §10 |
+| PD-22 | Uso dos candles de 2023 a 2025 | (a) estudo de robustez de H-01 e H-02; (b) dentro do walk-forward oficial | **(a) estudo de robustez** | §3.2 |
+| PD-23 | Onde transformar negócios em agregados por minuto | (a) MacBook, lendo do S3 dia a dia; (b) host de produção; (c) EC2 dedicada e temporária | **(c) EC2 dedicada**, com o MacBook como plano B (estimativa de custo aprovada: ~US$ 0,60 por execução) | §12 |
 
 ---
 
@@ -86,14 +86,14 @@ O livro de ofertas só existe a partir da coleta, e as ablações exigem a mesma
 - **Trilha A — histórico (B0 a B6):** 23/10/2025 a 22/10/2026, a janela em que há negócios. Responde H-01, H-02 e a parte 1 de H-03. Pode começar logo depois da aprovação deste documento, sem esperar G1, porque usa arquivos públicos (PRD §8.3).
 - **Trilha B — com livro (B0 a B7):** de 23/10/2026 em diante. Responde a parte 2 de H-03 e H-04. Começa depois de G1 e de acumular dados suficientes (§13).
 
-**[PROPOSTA] PD-22:** os candles de 2023 a 2025 entram como **estudo de robustez** de B3, B4 e B5 (mesmo método, outra época), e não no walk-forward oficial. Servem para ver se um resultado da trilha A depende de um único regime de mercado (R-06).
+**[DECISÃO] PD-22:** os candles de 2023 a 2025 entram como **estudo de robustez** de B3, B4 e B5 (mesmo método, outra época), e não no walk-forward oficial. Servem para ver se um resultado da trilha A depende de um único regime de mercado (R-06).
 
 ### 3.3 Desenvolvimento e holdout (pré-registro)
 
 | Trilha | Desenvolvimento | Holdout | Situação |
 |---|---|---|---|
-| A | 23/10/2025 a 22/07/2026 (9 meses) | **23/07/2026 a 22/10/2026 (3 meses)** [PROPOSTA] PD-17 | Os dados existem; o holdout fica lacrado a partir da aprovação. |
-| B | 23/10/2026 até a data de congelamento (mínimo 8 semanas) | **4 semanas corridas depois do congelamento** [PROPOSTA] PD-18 | O holdout ainda não existe: é coletado depois que modelo e critérios estão congelados. |
+| A | 23/10/2025 a 22/07/2026 (9 meses) | **23/07/2026 a 22/10/2026 (3 meses)** [DECISÃO] PD-17 | Os dados existem; o holdout está lacrado (nenhuma consulta desde o backfill). |
+| B | 23/10/2026 até a data de congelamento (mínimo 8 semanas) | **6 semanas corridas depois do congelamento** [DECISÃO] PD-18 | O holdout ainda não existe: é coletado depois que modelo e critérios estão congelados. |
 
 Regras:
 
@@ -118,7 +118,7 @@ Regras:
 | Negócio de arquivo | `trade_ts_us` + **L** |
 | Candle de arquivo | `close_ts_us` + **L** |
 
-**[PROPOSTA] PD-19:** L = 1 s. O atraso medido ao vivo do evento ao recebimento tem p50 de 69 ms (MD-23); 1 s é conservador. Se o p99 medido na semana do CA-01 passar de 1 s, L passa a ser esse p99. Como as decisões são por minuto (§4.1), L afeta pouco o resultado; a regra existe para não haver exceção ao PP-04.
+**[DECISÃO] PD-19:** L = 1 s. O atraso medido ao vivo do evento ao recebimento tem p50 de 69 ms (MD-23) e p99 por hora entre ~100 e ~250 ms nos primeiros dias da coleta (página pública de status, doc 03 §7.7); 1 s é conservador. Se o p99 medido na semana do CA-01 passar de 1 s, L passa a ser esse p99. Como as decisões são por minuto (§4.1), L afeta pouco o resultado; a regra existe para não haver exceção ao PP-04.
 
 ---
 
@@ -130,13 +130,13 @@ A decisão é tomada uma vez por minuto, em t_d = fechamento do minuto + 2 s (te
 
 ### 4.2 Horizontes
 
-**[PROPOSTA] PD-15:** dois horizontes pré-registrados, **H = 15 min** e **H = 60 min**, avaliados separadamente e contados como experimentos distintos (§11).
+**[DECISÃO] PD-15:** dois horizontes pré-registrados, **H = 15 min** e **H = 60 min**, avaliados separadamente e contados como experimentos distintos (§11).
 
 Motivo: com custo de ~0,22% por operação completa (§9), o preço precisa andar mais que isso para haver lucro. **[HIPÓTESE]** Em poucos minutos, os movimentos típicos do BTC são da mesma ordem dos custos; 15 e 60 minutos dão mais espaço sem sair do intraday (DEC-15). A varredura de muitos horizontes (opção c) aumentaria o número de testes e a chance de achar sorte (R-02).
 
 ### 4.3 Alvo
 
-**[PROPOSTA] PD-16:** alvo binário y = 1 se o retorno da operação simulada (entrada em t_d, saída em t_d + H, pelas regras de §9) for positivo **depois dos custos**; y = 0 caso contrário.
+**[DECISÃO] PD-16:** alvo binário y = 1 se o retorno da operação simulada (entrada em t_d, saída em t_d + H, pelas regras de §9) for positivo **depois dos custos**; y = 0 caso contrário.
 
 - O modelo estima p = P(y = 1). A decisão entra comprada se p > τ, com τ escolhido na validação interna (§8.2).
 - Usar o retorno líquido no alvo alinha o que o modelo aprende com o que interessa (lucro depois de custos), em vez de prever direção pura.
@@ -232,7 +232,7 @@ Depois do desenvolvimento, para cada degrau e horizonte, o modelo final é trein
 
 ## 9. Custos e simulação de execução
 
-**[PROPOSTA] PD-20:**
+**[DECISÃO] PD-20:**
 
 | Item | Valor base | Sensibilidade |
 |---|---|---|
@@ -255,7 +255,7 @@ Ordens a mercado (taker) são a hipótese conservadora; executar como maker (ord
 - **Diagnósticas:** AUC e log loss do classificador; importância das features. Não decidem nada sozinhas.
 - **Por subperíodo:** cada dobra do walk-forward separadamente (IS-18).
 
-### 10.2 Critérios de G2 [PROPOSTA] PD-21 — a pré-registrar
+### 10.2 Critérios de G2 [DECISÃO] PD-21 — pré-registrados em 26/10/2026
 
 Um modelo passa em G2 se, **no holdout**, atender a todos:
 
@@ -270,7 +270,7 @@ Um modelo passa em G2 se, **no holdout**, atender a todos:
 
 As ablações (H-01 a H-03) comparam degraus vizinhos pela diferença de expectativa líquida por operação e de Sharpe, com intervalo de confiança por bootstrap pareado nos mesmos dias. Ganho incremental = limite inferior do intervalo acima de zero.
 
-Os critérios ficam congelados quando este documento for aprovado. Alterá-los depois de qualquer avaliação de holdout invalida a avaliação (RN-013).
+Os critérios estão congelados desde 26/10/2026 (commit que registra esta versão). Alterá-los depois de qualquer avaliação de holdout invalida a avaliação (RN-013); qualquer mudança antes disso precisa de nova aprovação e fica no histórico.
 
 ---
 
@@ -286,7 +286,14 @@ Os critérios ficam congelados quando este documento for aprovado. Alterá-los d
 ## 12. Onde roda e como os dados chegam
 
 - **Pesquisa no MacBook** (doc 03; doc 02 §2.3). O disco tem pouco espaço livre (~7 GB em 24/10/2026), então os negócios brutos não são copiados para o Mac.
-- **[PROPOSTA] PD-23:** um passo prévio transforma negócios em **agregados por minuto** (RF-171 e RF-172: volume por lado do agressor, contagem, VWAP, estatísticas de tamanho), lendo do S3 um dia por vez no Mac e gravando o resultado em `derived/minute_trades/` no S3. 12 meses de negócios (11,9 GB) viram algumas centenas de MB. A leitura do S3 pela internet fica dentro da franquia mensal gratuita de saída de dados [A VERIFICAR para contas do plano gratuito].
+- **[DECISÃO] PD-23:** um passo prévio transforma negócios em **agregados por minuto** (RF-171 e RF-172: volume por lado do agressor, contagem, VWAP, estatísticas de tamanho) e grava o resultado em `derived/minute_trades/` no S3. 12 meses de negócios (11,9 GB) viram algumas centenas de MB. Roda numa **EC2 dedicada e temporária**, na conta e na região do projeto:
+  - **Instância:** c7g.2xlarge (8 vCPUs Graviton, 16 GiB), US$ 0,289/h sob demanda em us-east-2 (preço consultado em 26/10/2026). Processa um dia de negócios por núcleo; ~1 a 2 h para os 12 meses [HIPÓTESE, a medir na primeira execução].
+  - **Custo:** ~US$ 0,60 por execução, pago pelos créditos (estimativa aprovada em 26/10/2026). Sem tráfego pela internet: lê do S3 pelo endpoint da VPC, na mesma região.
+  - **Segurança e custo sob controle:** papel IAM só com leitura de `normalized/trades/` e gravação em `derived/minute_trades/`; a instância se encerra e se apaga sozinha ao terminar, com um limite de horas como trava (desligamento iniciado pela instância com comportamento `terminate`).
+  - **Não toca o coletor:** a máquina de produção não divide CPU com o processamento.
+  - **Plano B:** MacBook, lendo do S3 dia a dia (~6 h; ~12 GB de saída do S3).
+  - **[A VERIFICAR]** se o plano gratuito da conta libera instâncias c7g: conferir com `run-instances --dry-run` (não cria nada) antes da primeira execução.
+  - A arquitetura dessa EC2 (rede, IAM, como é lançada) entra no doc 03 antes da implementação.
 - O mesmo vale para o livro (agregados por minuto dos snapshots top 20), que já é pequeno.
 - Dependências novas (`xgboost`, `scikit-learn`, `polars` ou `duckdb`) ficam num grupo opcional de pesquisa, fora do pacote do host, até a V0.3 precisar do código de features ao vivo (doc 03 §5 será atualizado).
 
@@ -296,7 +303,7 @@ Os critérios ficam congelados quando este documento for aprovado. Alterá-los d
 
 | Etapa | Entrega | Depende de |
 |---|---|---|
-| 1 | Agregados por minuto de negócios (PD-23) e de livro | Aprovação deste documento |
+| 1 | Agregados por minuto de negócios (PD-23, EC2 dedicada) e de livro | Aprovação deste documento; seção da EC2 dedicada no doc 03 |
 | 2 | Biblioteca de features com testes de point-in-time (F-12) | 1 |
 | 3 | Construtor de datasets versionados e trava do holdout (F-13, §3.3) | 2 |
 | 4 | Simulador de operações com custos e baselines B0 a B3 (F-14, F-17) | 3 |
@@ -304,10 +311,10 @@ Os critérios ficam congelados quando este documento for aprovado. Alterá-los d
 | 6 | Trilha A: walk-forward de B4 a B6, ablações, relatório de desenvolvimento | 4, 5 |
 | 7 | Trilha A: avaliação única do holdout | 6 e critérios congelados |
 | 8 | Trilha B: desenvolvimento com B0 a B7 | G1 e ≥ 8 semanas de livro (por volta de 20/12/2026) |
-| 9 | Trilha B: congelamento, coleta do holdout (4 semanas) e avaliação única | 8 |
+| 9 | Trilha B: congelamento, coleta do holdout (6 semanas) e avaliação única | 8 |
 | 10 | Relatório de conclusão da V0.2: status de H-01 a H-04 (CA-12) | 7, 9 |
 
-Pelo calendário proposto, a trilha B só termina por volta do fim de janeiro de 2027, antes do CP-2 (15/03/2027, doc 03 §10.4).
+Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 2027, antes do CP-2 (15/03/2027, doc 03 §10.4).
 
 ---
 
@@ -316,7 +323,7 @@ Pelo calendário proposto, a trilha B só termina por volta do fim de janeiro de
 | Risco | Mitigação |
 |---|---|
 | Custos maiores que os movimentos no horizonte escolhido (R-01, R-04) | Horizontes de 15 e 60 min; três cenários de custo; resultado negativo aceito. |
-| Pouca amostra na trilha B (R-05) | IS-17: abaixo de 200 operações, inconclusivo; possibilidade de estender a coleta antes do congelamento. |
+| Pouca amostra na trilha B (R-05) | Holdout de 6 semanas (PD-18); IS-17: abaixo de 200 operações, inconclusivo; possibilidade de estender a coleta antes do congelamento. |
 | Testes múltiplos e snooping (R-02, R-15) | Grade pequena; registro de todas as tentativas; DSR; holdout lacrado e usado uma vez. |
 | Diferença entre dados de arquivo e ao vivo | Latência assumida (§3.5); mesma normalização (doc 06 §7, item 3); comparar as duas fontes num mesmo dia quando a recuperação (F-06) existir. |
 | Mudança de regime (R-06) | Avaliação por dobra (IS-18); estudo de robustez com 2023 a 2025 (PD-22). |
@@ -327,9 +334,10 @@ Pelo calendário proposto, a trilha B só termina por volta do fim de janeiro de
 
 | Item | Onde se resolve |
 |---|---|
-| PD-15 a PD-23 (§1) | Revisão deste documento |
 | Taxa de spot da Binance em vigor | [A VERIFICAR] antes da etapa 4 |
-| Franquia de saída de dados do S3 no plano gratuito | [A VERIFICAR] antes da etapa 1 |
+| Plano gratuito libera instâncias c7g (PD-23) | [A VERIFICAR] com `run-instances --dry-run` antes da etapa 1 |
+| Seção da EC2 dedicada (rede, IAM, lançamento) | Doc 03, antes da etapa 1 |
+| Franquia de saída de dados do S3 no plano gratuito | [A VERIFICAR] só se o plano B (MacBook) for usado |
 | p99 do atraso ao vivo (PD-19) | Semana do CA-01 |
 | Modelo de preenchimento final e limites de drawdown | Doc 05 |
 | Degradação tolerada paper × backtest (H-05) | Doc 07 |
@@ -359,3 +367,4 @@ Pelo calendário proposto, a trilha B só termina por volta do fim de janeiro de
 | Versão | Data | Descrição |
 |---|---|---|
 | 0.1 | 24/10/2026 | Rascunho inicial: duas trilhas (histórico e com livro), horizontes, alvo, features, baselines, validação, custos, critérios de G2 a pré-registrar e plano de trabalho; PD-15 a PD-23. |
+| 0.2 | 26/10/2026 | PD-15 a PD-23 decididas (§1): 15 e 60 min, alvo binário líquido, holdout A de 3 meses, holdout B de 6 semanas depois do congelamento, L = 1 s, custo base 0,10% por lado, critérios de G2 pré-registrados, candles de 2023–2025 como robustez, agregados por minuto numa EC2 dedicada e temporária. |
