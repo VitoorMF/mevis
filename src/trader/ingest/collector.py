@@ -664,6 +664,7 @@ class Collector:
                 "primary_session": primary.session_id if primary else None,
                 "primary_endpoint": primary.endpoint if primary else None,
                 "open_sessions": [s.session_id for s in self._sessions],
+                "session_messages": {s.session_id: s.messages for s in self._sessions},
                 "channels": {
                     stream: {
                         "messages": self._stats[stream].messages,

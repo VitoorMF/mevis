@@ -1,11 +1,12 @@
-"""Linha de comando: `collect`, `status`, `pipeline`, `backfill`, `quality`, `dashboard-data` e
-`smoke` (RF-181 a RF-185)."""
+"""Linha de comando: `collect`, `status`, `pipeline`, `backfill`, `quality`, `dashboard-data`,
+`status-publisher` e `smoke` (RF-181 a RF-185)."""
 
 import argparse
 import asyncio
 import json
 import signal
 import sys
+import threading
 import time
 from collections.abc import Sequence
 from datetime import date
@@ -33,6 +34,7 @@ from trader.ops.state import StateStore
 from trader.pipeline.backfill import Backfill, BackfillBusy, BackfillReport
 from trader.pipeline.dashboard_data import export, sync_from_s3
 from trader.pipeline.hourly import HourlyPipeline, PipelineBusy
+from trader.pipeline.public_status import DirectorySink, S3Sink, Sink, StatusPublisher
 from trader.pipeline.quality_report import build_report
 from trader.recovery.gaps import GapRecovery
 from trader.sources.binance_archive import DATASETS, ArchiveClient, ArchiveError
@@ -42,6 +44,8 @@ from trader.storage.layout import HOUR_US
 from trader.storage.objectstore import LocalDirectoryStore, ObjectStore, S3ObjectStore
 
 STALE_HEALTH_S = 30
+PIPELINE_COMMANDS = ("pipeline", "backfill", "quality", "dashboard-data", "status-publisher")
+"""Comandos configurados pela tabela `[pipeline]`."""
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -97,13 +101,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     dashboard.add_argument("--data-dir", type=Path, help="cache local (com S3) ou dados do host")
     dashboard.add_argument("--out", type=Path, required=True, help="diretório dos CSVs")
 
+    publisher = commands.add_parser(
+        "status-publisher", help="publica a página pública de status (doc 03 §7.7)"
+    )
+    publisher.add_argument("--config", type=Path, help="TOML com public_bucket em [pipeline]")
+    publisher.add_argument("--data-dir", type=Path)
+    publisher.add_argument("--out", type=Path, help="grava num diretório local em vez do bucket")
+    publisher.add_argument("--once", action="store_true", help="uma rodada só")
+    publisher.add_argument("--log-level", default="INFO")
+
     smoke = commands.add_parser("smoke", help="testa a conectividade com a Binance (doc 03 §9.4)")
     smoke.add_argument("--config", type=Path)
     smoke.add_argument("--duration", type=float, default=600.0, help="segundos de WebSocket")
 
     args = parser.parse_args(argv)
     try:
-        if args.command in ("pipeline", "backfill", "quality", "dashboard-data"):
+        if args.command in PIPELINE_COMMANDS:
             pipeline_config = load_pipeline_config(
                 args.config,
                 data_dir=args.data_dir,
@@ -128,6 +141,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return quality_report(pipeline_config, args.start, args.end, args.json)
     if args.command == "dashboard-data":
         return dashboard_data(pipeline_config, args.out)
+    if args.command == "status-publisher":
+        configure_logging(args.log_level)
+        return publish_status(pipeline_config, args.out, once=args.once)
     if args.command == "collect":
         configure_logging(args.log_level)
         asyncio.run(run_collector(config, args.duration))
@@ -321,6 +337,33 @@ def dashboard_data(config: PipelineConfig, out_dir: Path) -> int:
     print(f"coleta desde {report.collection_start}")
     for name, count in report.rows.items():
         print(f"  {name}: {count} linha(s)")
+    return 0
+
+
+def publish_status(config: PipelineConfig, out_dir: Path | None, *, once: bool = False) -> int:
+    if out_dir is None and not config.public_bucket:
+        print("sem destino: defina public_bucket em [pipeline] ou use --out", file=sys.stderr)
+        return 2
+    session = None
+    if config.replica_s3_bucket or out_dir is None:
+        import boto3  # só o pipeline e a CLI usam o SDK da AWS (ADR-03)
+
+        session = boto3.session.Session(region_name=config.aws_region)
+    data_s3 = session.client("s3") if session and config.replica_s3_bucket else None
+    sink: Sink
+    if out_dir is not None:
+        sink = DirectorySink(out_dir)
+    else:
+        assert session is not None and config.public_bucket
+        sink = S3Sink(session.client("s3"), config.public_bucket)
+    publisher = StatusPublisher(config, sink, data_s3)
+    if once:
+        publisher.tick(time.time_ns() // 1000)
+        return 0
+    stop = threading.Event()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda *_: stop.set())
+    publisher.run(stop)
     return 0
 
 

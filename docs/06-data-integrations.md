@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.12 — rascunho |
+| Versão | 0.13 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -467,6 +467,17 @@ As mensagens recebidas são contadas linha a linha nos arquivos brutos do S3; a 
 
 Só entram dados da coleta ao vivo: os arquivos de backfill (`archive.parquet`) e qualquer período anterior ao início da coleta ficam de fora, o que mantém o holdout da trilha A do doc 04 sem consulta. O comando não publica nada; o painel é atualizado a partir dos arquivos gerados.
 
+### 8.5 Página pública de status (doc 03 §7.7, ADR-13)
+
+Só métricas do sistema de coleta. **Nunca entram:** preço, volume em dinheiro, quantidades negociadas, livro de ofertas, negócios individuais ou qualquer série que permita reconstruir dados de mercado; nem identificadores da infraestrutura.
+
+| Arquivo | Atualização | Conteúdo |
+|---|---|---|
+| `status.json` | 15 s | Estado do coletor (ativo, sem sinal ou parado; versão), silêncio de cada canal no instante da leitura, mensagens por segundo por canal (diferença entre leituras) e a série dos últimos 15 min, mensagens recebidas desde o início, sessões e reconexões não planejadas (fechamentos que não são implantação nem rotação), offset de relógio, lacunas por status e as das últimas 24 h (canal, causa, início, duração, status; sem ids de negócio), bytes brutos recebidos e guardados, tamanho do bucket de dados (a cada 6 h), contagens do histórico importado |
+| `history.json` | quando muda (~1 h) | Por hora, até 7 dias e só desde o início da coleta: registros normalizados por canal (contagem), minutos [completos, recuperados, ausentes, outros] por canal, atraso mediano e p99 dos negócios ao vivo |
+
+Atribuição na página: "Dados de mercado: Binance. Esta página mostra apenas métricas do sistema de coleta." Contagens de eventos (mensagens, negócios recebidos) são operacionais; não há preços nem valores.
+
 ---
 
 ## 9. Recuperação de falhas por canal
@@ -581,3 +592,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.10 | 24/10/2026 | §9.1: funcionamento da recuperação de lacunas (canais brutos `rest:klines` e `archive:trades`, status, falhas). |
 | 0.11 | 25/10/2026 | §8.4: dados do painel da coleta (`trader dashboard-data`). |
 | 0.12 | 25/10/2026 | §8.4: tabela de destaques do painel (`highlights.csv`). |
+| 0.13 | 25/10/2026 | §8.5: o que a página pública de status pode e não pode mostrar, com os campos como implementados. |

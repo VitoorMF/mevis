@@ -117,6 +117,9 @@ class PipelineConfig:
     archive_base_url: str = "https://data.binance.vision"
     """Arquivos públicos para recuperar negócios (doc 06 §9.1)."""
     recovery_enabled: bool = True
+    public_bucket: str | None = None
+    """Bucket da página pública de status (doc 03 §7.7, ADR-13); sem ele, nada é publicado."""
+    status_interval_s: float = 15.0
     trades_row_group: int = 50_000
     books_row_group: int = 2_000
 

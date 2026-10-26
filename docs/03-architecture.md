@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.12 — rascunho |
+| Versão | 0.13 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -48,6 +48,7 @@ Preços foram consultados na AWS Price List API em 23/10/2026 (região us-east-2
 | ADR-10 | Estado do Terraform no S3, com bloqueio nativo, criado por uma configuração de *bootstrap* separada. | §7.6 |
 | ADR-11 | (Preliminar) O Trading Engine da V0.3 terá conexão de mercado própria, sem depender do coletor. | §13 |
 | ADR-12 | Alertas por e-mail via SNS (resolve PD-13). | §7.5 |
+| ADR-13 | Página pública de status só operacional: bucket separado, lido só pelo CloudFront (OAC), com um JSON gravado pelo servidor a cada 15 s; nenhum dado de mercado (aprovada em 25/10/2026). | §7.7 |
 
 ---
 
@@ -155,7 +156,9 @@ trader/
   recovery/    estratégias de recuperação por canal
   pipeline/    rodada horária: órfãos, compressão, normalização por hora, máscara, exportações,
                réplica e retenção; backfill dos arquivos públicos (doc 06 §7);
-               relatório de qualidade (doc 06 §8.3); dados do painel da coleta (doc 06 §8.4)
+               relatório de qualidade (doc 06 §8.3); dados do painel da coleta (doc 06 §8.4);
+               publicador da página pública de status (§7.7)
+  public/      página pública de status (HTML estático, sem bibliotecas externas; §7.7)
   ops/         configuração, logs estruturados, StatsD, saúde, estado SQLite
   cli/         comandos
 ```
@@ -294,6 +297,31 @@ A recuperação é a primeira etapa do pipeline horário. Ela lê as lacunas abe
 
 **Dimensões das métricas [A VERIFICAR na primeira implantação]:** os alarmes esperam `InstanceId` + `metric_type=gauge` nas métricas StatsD (o agente publica com `append_dimensions` de `InstanceId`) e `InstanceId`, `path=/`, `fstype=xfs` no disco. Se divergirem, o alarme de sinal de vida dispara de imediato, o que expõe o erro (runbook em `infra/README.md`, passo 8). As ações dos alarmes da aplicação ficam desligadas (`app_alarms_enabled`) até a coleta começar.
 
+### 7.7 Página pública de status (ADR-13)
+
+Página para mostrar o projeto (LinkedIn, portfólio) com a saúde da coleta em tempo real, **sem nenhum dado de mercado** (doc 06 §8.5).
+
+```text
+trader-status (serviço no host: `trader status-publisher`, a cada 15 s)
+  lê health/, state.db (só leitura), máscara e camada normalizada locais
+  └─► s3://trader-public-<conta>-<região>/status.json    (Cache-Control 10 s)
+      s3://…/history.json   (conferido a cada 5 min, gravado só quando muda: ~1 vez por hora)
+      s3://…/index.html     (ao iniciar; o trader-deploy reinicia o serviço a cada versão)
+                     ▲
+   CloudFront (OAC) ─┘ ─► https://<id>.cloudfront.net  (o navegador busca status.json a cada 15 s)
+```
+
+- **Contagens ao vivo:** o arquivo de saúde de cada instância do coletor traz as mensagens por sessão aberta (`session_messages`); o total desde o início soma as sessões fechadas (`state.db`) e as abertas. As taxas por canal vêm da diferença entre duas leituras da mesma instância; na troca a/b vale a maior das duas, para não contar em dobro.
+- **Histórico:** só os arquivos horários da coleta ao vivo (nunca o `archive.parquet` do backfill), o que mantém o holdout fora da página (doc 04 §3.3); minutos anteriores ao início da coleta não contam como perdidos. O resumo de cada hora fica em cache (`public-status/history-cache.json`) e só é recalculado se o arquivo mudar.
+- **Totais do bucket de dados** (objetos, bytes) e contagens do backfill: a cada 6 h, listando o bucket com a permissão de leitura que o pipeline já tem.
+
+- **Bucket próprio**, com acesso público bloqueado; só a distribuição do CloudFront lê, por OAC. O bucket de dados continua fechado (ADR-08).
+- **O servidor continua sem portas de entrada** (ADR-06): ele só grava no bucket; quem atende o público é o CloudFront.
+- **Permissão mínima:** o papel da instância ganha `s3:PutObject` só nesse bucket, sem leitura nem exclusão.
+- **Serviço separado do coletor** (ADR-03): o `trader-status` usa o SDK da AWS; o coletor continua sem ele.
+- **Sem identificadores** na página: nada de ID da conta, nome de bucket, ID da instância ou IP.
+- **Custo** (§10.1): ~173 mil gravações por mês no S3 (≈ US$ 0,86); CloudFront dentro da franquia gratuita (1 TB e 10 milhões de requisições por mês) [A VERIFICAR no plano gratuito]; armazenamento de poucos KB.
+
 ### 7.6 Terraform (DEC-22, ADR-10)
 
 ```text
@@ -305,6 +333,7 @@ infra/
     data_bucket/      bucket de dados, políticas, ciclo de vida
     collector_host/   papel IAM, perfil de instância, EC2, user data, alarmes da instância
     observability/    grupos de log, SNS, alarmes, orçamento
+    public_status/    bucket da página pública, OAC e distribuição do CloudFront (§7.7)
 ```
 
 - Versões do Terraform e do provider fixadas (`.terraform.lock.hcl`); backend S3 com `use_lockfile = true` (Terraform ≥ 1.10), sem DynamoDB.
@@ -503,3 +532,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.10 | 24/10/2026 | §4 e §6.4: recuperação de lacunas como etapa do pipeline horário, no lugar dos timers `trader-recovery` e `trader-archive`. |
 | 0.11 | 25/10/2026 | §5: dados do painel da coleta no pacote `pipeline`. |
 | 0.12 | 25/10/2026 | §6.2 e §11: silêncio de canal com a conexão ativa troca de sessão sem fechar a antiga antes (abre a nova primeiro). |
+| 0.13 | 25/10/2026 | ADR-13 e §7.7: página pública de status só operacional, servida pelo CloudFront; §5 inclui `public/` e o publicador; §7.6 inclui o módulo `public_status`. |

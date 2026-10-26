@@ -35,6 +35,10 @@ rest_base_url = "https://data-api.binance.vision"
 [pipeline]
 replica_s3_bucket = "${bucket}"
 aws_region = "${region}"
+%{ if public_bucket != "" ~}
+# Página pública de status (doc 03 §7.7, ADR-13).
+public_bucket = "${public_bucket}"
+%{ endif ~}
 EOF
 
 # ------------------------------------------------------------------ agente do CloudWatch
@@ -139,6 +143,36 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+# Página pública de status (doc 03 §7.7): habilitada pelo trader-deploy quando há public_bucket.
+cat > /etc/systemd/system/trader-status.service <<'EOF'
+[Unit]
+Description=Pagina publica de status (doc 03 secao 7.7)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=trader
+Group=trader
+WorkingDirectory=/var/lib/trader
+Environment=HOME=/var/lib/trader
+ExecStart=/opt/trader/current/bin/trader status-publisher --config /etc/trader/trader.toml
+Restart=always
+RestartSec=30
+Nice=10
+MemoryMax=300M
+OOMScoreAdjust=800
+StandardOutput=append:/var/log/trader/status.log
+StandardError=append:/var/log/trader/status.log
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/trader /var/log/trader
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 cat > /etc/logrotate.d/trader <<'EOF'
 /var/log/trader/*.log {
   daily
@@ -204,6 +238,11 @@ PY
     fi
     systemctl enable "trader-collector@$NEW"
     echo "coletor $NEW ativo com a versão $VERSION"
+    # A página pública roda a mesma versão; reiniciar também republica o index.html.
+    if grep -q '^public_bucket' /etc/trader/trader.toml; then
+      systemctl enable trader-status
+      systemctl restart trader-status
+    fi
     exit 0
   fi
   sleep 1

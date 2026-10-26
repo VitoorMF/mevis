@@ -38,6 +38,12 @@ module "data_bucket" {
   bucket_name = "trader-data-${var.account_id}-${var.region}"
 }
 
+module "public_status" {
+  source      = "../../modules/public_status"
+  name        = local.name
+  bucket_name = "trader-public-${var.account_id}-${var.region}"
+}
+
 module "observability" {
   source             = "../../modules/observability"
   name               = local.name
@@ -61,4 +67,6 @@ module "collector_host" {
   sns_topic_arn       = module.observability.sns_topic_arn
   uv_version          = var.uv_version
   app_alarms_enabled  = var.app_alarms_enabled
+  public_bucket_arn   = module.public_status.bucket_arn
+  public_bucket_name  = module.public_status.bucket_name
 }

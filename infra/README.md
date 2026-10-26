@@ -13,6 +13,7 @@ infra/
     data_bucket/        bucket privado, versionado, criptografado, só HTTPS, prevent_destroy
     collector_host/     IAM, EC2 t4g, script de inicialização, systemd, trader-deploy, alarmes
     observability/      grupos de log, SNS por e-mail, orçamento mensal
+    public_status/      página pública de status: bucket fechado + CloudFront com OAC (doc 03 §7.7)
 ```
 
 ## Pré-requisitos
@@ -63,11 +64,12 @@ Nenhum `apply` sem revisar o `plan` (RN-012).
 | Terminal no host | `$(terraform -chdir=infra/envs/prod output -raw ssm_session)` |
 | Nova versão | commit → `scripts/publish-artifact.sh` → `sudo trader-deploy <versão>` (troca de cor a/b sem lacuna, doc 03 §9.2) |
 | Voltar versão | `sudo trader-deploy <versão anterior>` |
-| Logs | CloudWatch Logs `/trader/collector` e `/trader/pipeline`; no host, `/var/log/trader/` |
+| Logs | CloudWatch Logs `/trader/collector` e `/trader/pipeline`; no host, `/var/log/trader/` (a página pública grava em `status.log`) |
+| Página pública (doc 03 §7.7) | endereço em `terraform -chdir=infra/envs/prod output -raw public_status_url`; serviço `trader-status`, reiniciado pelo `trader-deploy`; `sudo systemctl status trader-status` |
 | Pipeline manual | `sudo systemctl start trader-pipeline.service` |
 | Backfill (doc 06 §7) | `sudo systemd-run --unit trader-backfill-<dataset> --uid trader --gid trader -p MemoryMax=700M -p CPUQuota=25% -p Nice=19 -E HOME=/var/lib/trader /opt/trader/current/bin/trader backfill --config /etc/trader/trader.toml --dataset <dataset> --start <AAAA-MM-DD> --end <AAAA-MM-DD>`; acompanhar com `journalctl -u trader-backfill-<dataset>`. O `CPUQuota` de 25% fica abaixo do que o t4g.small acumula de créditos de CPU (modo `standard`). |
 
-Mudanças no script de inicialização (`user_data`) não recriam a instância (`ignore_changes`): aplicar no host pelo SSM ou recriar o host de propósito. A instância tem proteção contra encerramento, e os buckets têm `prevent_destroy`.
+Mudanças no script de inicialização (`user_data`) não recriam a instância (`ignore_changes`): aplicar no host pelo SSM ou recriar o host de propósito. A instância tem proteção contra encerramento, e o bucket de dados tem `prevent_destroy`; o da página pública não, porque o conteúdo é regravado a cada 15 s.
 
 ## Custos (doc 03 §10)
 

@@ -53,6 +53,16 @@ data "aws_iam_policy_document" "collector" {
     resources = [var.bucket_arn]
   }
 
+  # Página pública de status (ADR-13): só gravar; sem leitura nem exclusão.
+  dynamic "statement" {
+    for_each = var.public_bucket_arn == "" ? [] : [var.public_bucket_arn]
+    content {
+      sid       = "WritePublicStatus"
+      actions   = ["s3:PutObject"]
+      resources = ["${statement.value}/*"]
+    }
+  }
+
   statement {
     sid       = "WriteLogs"
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
@@ -125,6 +135,7 @@ resource "aws_instance" "collector" {
     namespace           = var.metrics_namespace
     collector_log_group = var.collector_log_group
     pipeline_log_group  = var.pipeline_log_group
+    public_bucket       = var.public_bucket_name
   })
 
   tags = { Name = "${var.name}-collector" }

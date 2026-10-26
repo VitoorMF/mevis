@@ -74,7 +74,7 @@ def sync_from_s3(
         manifest = {}
     report = SyncReport()
     _download(client, bucket, data_dir, STATE_BACKUP, None, manifest, report)
-    start = _collection_start(data_dir / STATE_BACKUP)
+    start = collection_start(data_dir / STATE_BACKUP)
     if start is not None:
         last = today or datetime.now(UTC).date()
         first = datetime.fromtimestamp(start / 1e6, UTC).date()
@@ -161,7 +161,7 @@ def export(data_dir: Path, out_dir: Path, symbol: str) -> ExportReport:
     state_path = data_dir / "state.db"
     if not state_path.exists():
         state_path = data_dir / STATE_BACKUP
-    start = _collection_start(state_path)
+    start = collection_start(state_path)
     if start is None:
         raise ValueError(f"nenhuma sessão de coleta em {state_path}")
     first_minute = start // MINUTE_US * MINUTE_US + MINUTE_US  # primeiro minuto completo
@@ -310,7 +310,7 @@ def _highlights(
         rows.append(["raw_received_bytes", received, "camada bruta, descomprimida"])
         rows.append(["raw_stored_bytes", stored, "camada bruta, comprimida (zstd)"])
 
-    for dataset, (files, total, first_day, last_day) in sorted(_history(data_dir).items()):
+    for dataset, (files, total, first_day, last_day) in sorted(history_counts(data_dir).items()):
         rows.append([f"history_{dataset}_rows", total, f"{files} arquivos públicos importados"])
         rows.append([f"history_{dataset}_first_day", first_day, ""])
         rows.append([f"history_{dataset}_last_day", last_day, ""])
@@ -349,7 +349,7 @@ def _raw_counts(data_dir: Path, symbol: str) -> list[tuple[str, int, int]]:
     return counts
 
 
-def _history(data_dir: Path) -> dict[str, tuple[int, int, str, str]]:
+def history_counts(data_dir: Path) -> dict[str, tuple[int, int, str, str]]:
     """Por dataset: arquivos importados, linhas, primeiro e último dia (só contagens)."""
     result: dict[str, tuple[int, int, str, str]] = {}
     for path in sorted((data_dir / "derived" / "ops").glob("backfill_files*.parquet")):
@@ -370,7 +370,7 @@ def _history(data_dir: Path) -> dict[str, tuple[int, int, str, str]]:
 
 
 def _klines(data_dir: Path, symbol: str, first: int, minutes: dict[int, dict[str, float]]) -> None:
-    for path in _hourly(data_dir, "normalized/klines_1m", symbol):
+    for path in hourly_files(data_dir, "normalized/klines_1m", symbol):
         columns = ["open_ts_us", "open", "high", "low", "close", "volume"]
         table = pq.read_table(path, columns=columns)
         for open_ts, o, h, low, c, volume in zip(
@@ -395,7 +395,7 @@ def _trades(
     live: _LiveTrades,
 ) -> None:
     columns = ["trade_id", "trade_ts_us", "price", "qty", "quote_qty", "aggressor", "recv_ts_us"]
-    for path in _hourly(data_dir, "normalized/trades", symbol):
+    for path in hourly_files(data_dir, "normalized/trades", symbol):
         table = pq.read_table(path, columns=columns)
         table = table.filter(pc.greater_equal(table["trade_ts_us"], first))
         if table.num_rows == 0:
@@ -429,7 +429,7 @@ def _trades(
             )
             live.delays.append(delay_ms)
             p50, p99 = pc.quantile(delay_ms, q=[0.5, 0.99]).to_pylist()
-            hour = int(_hour_of(path))
+            hour = int(hour_of(path))
             delays[hour] = (received.num_rows, round(p50, 1), round(p99, 1))
 
 
@@ -458,7 +458,7 @@ def _book(
     data_dir: Path, symbol: str, first: int, minutes: dict[int, dict[str, float]]
 ) -> dict[str, Any] | None:
     last = None
-    for path in _hourly(data_dir, "normalized/book_top20", symbol):
+    for path in hourly_files(data_dir, "normalized/book_top20", symbol):
         table = pq.read_table(
             path, columns=["recv_ts_us", "bid_px", "bid_qty", "ask_px", "ask_qty"]
         )
@@ -494,7 +494,7 @@ def _book(
 
 def _quality(data_dir: Path, symbol: str, first: int) -> list[list[Any]]:
     counts: dict[tuple[int, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    for path in _hourly(data_dir, "derived/quality_mask", symbol):
+    for path in hourly_files(data_dir, "derived/quality_mask", symbol):
         table = pq.read_table(path, columns=["channel", "minute_ts_us", "status"])
         for channel, minute, status in zip(
             *(table[c].to_pylist() for c in table.column_names), strict=True
@@ -526,7 +526,7 @@ def _gaps(state_path: Path) -> list[list[Any]]:
     ]  # fmt: skip
 
 
-def _collection_start(state_path: Path) -> int | None:
+def collection_start(state_path: Path) -> int | None:
     if not state_path.exists():
         return None
     db = sqlite3.connect(f"file:{state_path}?mode=ro", uri=True)
@@ -537,7 +537,7 @@ def _collection_start(state_path: Path) -> int | None:
     return None if row is None or row[0] is None else int(row[0])
 
 
-def _hourly(data_dir: Path, dataset: str, symbol: str) -> list[Path]:
+def hourly_files(data_dir: Path, dataset: str, symbol: str) -> list[Path]:
     """Arquivos horários (`HH.parquet`); `archive.parquet` do backfill nunca entra."""
     root = data_dir / dataset / f"symbol={symbol}"
     return sorted(
@@ -545,7 +545,7 @@ def _hourly(data_dir: Path, dataset: str, symbol: str) -> list[Path]:
     )
 
 
-def _hour_of(path: Path) -> int:
+def hour_of(path: Path) -> int:
     day = datetime.strptime(path.parent.name.removeprefix("date="), "%Y-%m-%d").replace(tzinfo=UTC)
     return (int(day.timestamp()) + int(path.stem) * 3600) * 1_000_000
 

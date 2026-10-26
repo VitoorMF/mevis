@@ -58,3 +58,15 @@ variable "app_alarms_enabled" {
   type        = bool
   description = "Liga as ações dos alarmes da aplicação; deixe falso até o coletor rodar."
 }
+
+variable "public_bucket_arn" {
+  type        = string
+  default     = ""
+  description = "Bucket da página pública de status (ADR-13); vazio = sem permissão."
+}
+
+variable "public_bucket_name" {
+  type        = string
+  default     = ""
+  description = "Nome do mesmo bucket, gravado no trader.toml do host."
+}
