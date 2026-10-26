@@ -4,8 +4,8 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 01 — PRD |
-| Versão | 0.10 — rascunho |
-| Status | Decisões até DEC-27; aguardando confirmação da conta AWS e revisão final (§19) |
+| Versão | 0.11 — rascunho |
+| Status | Decisões até DEC-28; aguardando confirmação da conta AWS e revisão final (§19) |
 | Data | 23/10/2026 |
 | Responsável pelo produto | *a preencher* |
 | Fonte | [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -563,6 +563,7 @@ O MVP é aceito quando **todos** os critérios abaixo forem atendidos, **indepen
 | DEC-25 | Nome do projeto | **MERIS — Market Evidence & Research Intelligence System**. O pacote Python continua `trader` por enquanto. |
 | DEC-26 | Região AWS | **Ohio (`us-east-2`)**. A conta do projeto (nova experiência da AWS) só aceita essa região, por SCP da organização gerenciada pela AWS. A coleta usa só os endpoints `*.binance.vision`, que respondem dos EUA. Tóquio exigiria passar ao plano pago e ativar os recursos avançados (irreversível) e fica como plano B. Substitui DEC-21. |
 | DEC-27 | Método da V0.2 | Decisões PD-15 a PD-23 do doc 04 §1 (26/10/2026): horizontes de 15 e 60 min; alvo binário líquido de custos; holdout da trilha A de 23/07 a 22/10/2026; holdout da trilha B de 6 semanas coletadas depois do congelamento; latência assumida de 1 s para dados de arquivo; custo base de 0,10% por lado; critérios de G2 (IS-14 a IS-19) pré-registrados no doc 04 §10.2; candles de 2023–2025 como estudo de robustez; agregados por minuto de negócios numa EC2 dedicada e temporária (~US$ 0,60 por execução, créditos). |
+| DEC-28 | Doc 04 aprovado | Doc 04 v1.0 aprovado em 26/10/2026: catálogo de features, baselines B0–B3, regressão logística e XGBoost com grade fixa, validação walk-forward e plano de trabalho da V0.2; minutos com falha descartam o ponto nas janelas de até 60 min e do alvo, e nas janelas de 240 min e 24 h exigem ≥ 95% de minutos válidos. |
 
 Permanecem **em aberto**: as pendências de §17.2.
 
@@ -637,6 +638,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | 0.8 | 23/10/2026 | DEC-26: região us-east-2 (substitui DEC-21), após descobrir que a conta só aceita essa região e medir o acesso à Binance a partir dela; PR-12, R-18, RS-09 e DEC-23 revistos. |
 | 0.9 | 24/10/2026 | §17.2: PD-15 a PD-23, decisões de método da V0.2 propostas no doc 04. |
 | 0.10 | 26/10/2026 | DEC-27: PD-15 a PD-23 decididas (método da V0.2, doc 04 §1); critérios de G2 pré-registrados (PD-07 parcial); §13.3 aponta para o doc 04 §10.2. |
+| 0.11 | 26/10/2026 | DEC-28: doc 04 aprovado (v1.0). |
 
 ---
 

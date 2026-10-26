@@ -4,9 +4,9 @@
 |---|---|
 | Projeto | **MERIS** — Market Evidence & Research Intelligence System |
 | Documento | 04 — AI & Quantitative Research |
-| Versão | 0.2 — rascunho |
+| Versão | 1.0 — aprovado |
 | Escopo desta versão | Método de pesquisa da V0.2: dados e períodos, formulação do problema, features, baselines, modelos, validação, custos, métricas, critérios de G2 a pré-registrar, registro de experimentos e plano de trabalho. |
-| Status | Decisões PD-15 a PD-23 tomadas em 26/10/2026 (§1); critérios de G2 pré-registrados (§10.2). Falta a aprovação do documento como um todo. |
+| Status | Aprovado em 26/10/2026 (DEC-28). Decisões PD-15 a PD-23 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
 | Data | 26/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.8; [02 — SRS](02-srs.md) v0.5; [03 — Architecture](03-architecture.md) v0.8; [06 — Data & Integrations](06-data-integrations.md) v0.8 |
 
@@ -104,9 +104,10 @@ Regras:
 
 ### 3.4 Qualidade dos dados
 
-- **Ao vivo:** um minuto só serve como ponto de decisão se a máscara de qualidade (doc 06 §8.2) dos canais exigidos pelo degrau estiver em `ok` ou `recovered` **em todos os minutos da janela das features**. Caso contrário, o ponto é descartado. Esse é o mesmo comportamento que o Risk Manager terá ao vivo (RN-005, PP-05).
-- **Arquivo:** sem máscara (doc 06 §7, item 10). A regra equivalente: minuto sem candle ou com id de negócio ausente na janela das features ou do alvo descarta o ponto. Os 80 minutos ausentes de março de 2023 (MD-26) só afetam o estudo de robustez.
-- Nenhum preenchimento ou interpolação (RN-008).
+- **Ao vivo:** um minuto é válido se a máscara de qualidade (doc 06 §8.2) dos canais exigidos pelo degrau estiver em `ok` ou `recovered`. Um ponto de decisão só é usado se forem válidos **todos** os minutos das janelas de até 60 min e da janela do alvo; nas janelas mais longas (240 min e 24 h), a feature é calculada só com os minutos válidos e exige **pelo menos 95%** deles, senão o ponto é descartado. Esse é o mesmo comportamento que o Risk Manager terá ao vivo (RN-005, PP-05).
+- **Arquivo:** sem máscara (doc 06 §7, item 10). A regra equivalente: minuto sem candle ou com id de negócio ausente é inválido, com os mesmos limites das janelas curtas (estrito) e longas (≥ 95% válidos). Os 80 minutos ausentes de março de 2023 (MD-26) só afetam o estudo de robustez.
+- Nenhum preenchimento ou interpolação (RN-008): nas janelas longas, as estatísticas usam só os minutos que existem.
+- **Motivo da tolerância nas janelas longas:** com ~99,9% de minutos completos ao vivo (cerca de um minuto perdido por dia em algum canal), a regra estrita numa janela de 24 h descartaria um dia inteiro de pontos a cada minuto perdido, e a trilha B perderia boa parte dos dados (decidido em 26/10/2026).
 
 ### 3.5 Disponibilidade point-in-time e latência assumida
 
@@ -158,10 +159,10 @@ Motivo: com custo de ~0,22% por operação completa (§9), o preço precisa anda
 1. Toda feature é uma função dos dados disponíveis até t_d (§3.5); janelas terminam no último minuto fechado.
 2. O mesmo código calcula as features na pesquisa e na operação (PP-05, F-12). Ele recebe uma sequência de minutos e não sabe se veio de arquivo ou do ao vivo.
 3. Cada feature tem um teste automatizado de point-in-time (IS-11, CA-08): alterar qualquer dado posterior a t_d não pode mudar o valor da feature em t_d.
-4. Janela com minuto descartado (§3.4) torna o ponto inválido; não há preenchimento.
+4. Minuto inválido numa janela de até 60 min, ou mais de 5% de minutos inválidos numa janela longa (§3.4), torna o ponto inválido; não há preenchimento.
 5. Conversão para ponto flutuante só a partir daqui (doc 06 §5.3).
 
-### 5.2 Catálogo inicial [PROPOSTA]
+### 5.2 Catálogo inicial [DECISÃO]
 
 As famílias são cumulativas, seguindo a escada de §2. Valores de janela em minutos.
 
@@ -180,7 +181,7 @@ Mudanças no catálogo durante o desenvolvimento são permitidas e registradas (
 
 ## 6. Baselines
 
-| ID | Definição [PROPOSTA] |
+| ID | Definição [DECISÃO] |
 |---|---|
 | B0 | Nenhuma operação: resultado zero, custo zero. |
 | B1 | Compra no primeiro minuto da janela avaliada e venda no último, com os custos de uma operação. |
@@ -195,7 +196,7 @@ Mudanças no catálogo durante o desenvolvimento são permitidas e registradas (
 - **XGBoost** (PRD §8.2): modelo principal de B4 a B7.
 - Redes neurais (F-21) só depois do primeiro ciclo completo, como Could.
 
-**Seleção de hiperparâmetros [PROPOSTA]:** grade pequena e fixa, a mesma para B4 a B7, escolhida na validação interna de cada dobra:
+**Seleção de hiperparâmetros [DECISÃO]:** grade pequena e fixa, a mesma para B4 a B7, escolhida na validação interna de cada dobra:
 
 | Modelo | Grade |
 |---|---|
@@ -299,11 +300,11 @@ Os critérios estão congelados desde 26/10/2026 (commit que registra esta vers�
 
 ---
 
-## 13. Plano de trabalho da V0.2 [PROPOSTA]
+## 13. Plano de trabalho da V0.2 [DECISÃO]
 
 | Etapa | Entrega | Depende de |
 |---|---|---|
-| 1 | Agregados por minuto de negócios (PD-23, EC2 dedicada) e de livro | Aprovação deste documento; seção da EC2 dedicada no doc 03 |
+| 1 | Agregados por minuto de negócios (PD-23, EC2 dedicada) e de livro | Seção da EC2 dedicada no doc 03; requisitos da etapa no SRS |
 | 2 | Biblioteca de features com testes de point-in-time (F-12) | 1 |
 | 3 | Construtor de datasets versionados e trava do holdout (F-13, §3.3) | 2 |
 | 4 | Simulador de operações com custos e baselines B0 a B3 (F-14, F-17) | 3 |
@@ -368,3 +369,4 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 |---|---|---|
 | 0.1 | 24/10/2026 | Rascunho inicial: duas trilhas (histórico e com livro), horizontes, alvo, features, baselines, validação, custos, critérios de G2 a pré-registrar e plano de trabalho; PD-15 a PD-23. |
 | 0.2 | 26/10/2026 | PD-15 a PD-23 decididas (§1): 15 e 60 min, alvo binário líquido, holdout A de 3 meses, holdout B de 6 semanas depois do congelamento, L = 1 s, custo base 0,10% por lado, critérios de G2 pré-registrados, candles de 2023–2025 como robustez, agregados por minuto numa EC2 dedicada e temporária. |
+| 1.0 | 26/10/2026 | Aprovado (DEC-28): catálogo de features, baselines, modelos e grade, validação e plano. §3.4 e §5.1: janelas de até 60 min e do alvo continuam estritas; janelas de 240 min e 24 h usam só minutos válidos e exigem ≥ 95% deles. |

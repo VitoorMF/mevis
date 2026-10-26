@@ -5,10 +5,10 @@ Fase atual: **V0.1 (Data Engine) em implementação**, coberta pelos docs 02, 03
 | # | Documento | Status |
 |---|---|---|
 | 00 | [Contexto inicial](00-contexto-inicial.md) (transferência entre agentes) | Referência histórica, não normativa |
-| 01 | [Product Requirements Document (PRD)](01-prd.md) | Rascunho v0.10 |
+| 01 | [Product Requirements Document (PRD)](01-prd.md) | Rascunho v0.11 |
 | 02 | [Software Requirements Specification (SRS)](02-srs.md) | Rascunho v0.6 — V0.1 detalhada; V0.2 e V0.3 delimitadas |
 | 03 | [System Architecture Document](03-architecture.md) | Rascunho v0.14 — Data Engine e AWS (us-east-2); ADRs aprovadas; Terraform em `infra/` |
-| 04 | [AI & Quantitative Research Specification](04-ai-research.md) | Rascunho v0.2 — método da V0.2; PD-15 a PD-23 decididas (DEC-27); falta aprovar o documento |
+| 04 | [AI & Quantitative Research Specification](04-ai-research.md) | **Aprovado v1.0** — método da V0.2 (DEC-27, DEC-28) |
 | 05 | Trading & Risk Engine Specification | Não iniciado |
 | 06 | [Data & Integrations Specification](06-data-integrations.md) | Rascunho v0.14 — dados de mercado da V0.1 |
 | 07 | Testing & Validation Plan | Não iniciado |

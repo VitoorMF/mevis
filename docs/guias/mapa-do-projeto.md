@@ -1,6 +1,6 @@
 # Mapa do projeto MERIS
 
-> **Não normativo.** Resumo de orientação, escrito em 23/10/2026. Em caso de divergência, valem o PRD e os demais documentos numerados. Se algo aqui estiver desatualizado, os documentos mandam.
+> **Não normativo.** Resumo de orientação, escrito em 23/10/2026 e atualizado em 26/10/2026. Em caso de divergência, valem o PRD e os demais documentos numerados. Se algo aqui estiver desatualizado, os documentos mandam.
 
 **MERIS** (*Market Evidence & Research Intelligence System*, DEC-25) é um sistema de pesquisa e execução algorítmica para **BTC/USDT na Binance**. Antes de ser um robô, é um **instrumento de pesquisa**: a pergunta central é se combinar candles, volume, fluxo de negócios e livro de ofertas gera lucro líquido de custos, fora da amostra e melhor que alternativas simples. A resposta "não" é um resultado válido.
 
@@ -10,8 +10,8 @@
 
 | Versão | O que é | Situação |
 |---|---|---|
-| **V0.1 — Data Engine** | Coleta, valida e guarda os dados de mercado | **Em implementação.** Coletor, pipeline horário e infraestrutura AWS em código (`infra/`); o Git já tem commits para cada um |
-| **V0.2 — Pesquisa** | Features, backtester, treino de XGBoost, ablações B0–B7 | Não iniciada. Depende do doc 04 (não escrito) |
+| **V0.1 — Data Engine** | Coleta, valida e guarda os dados de mercado | **Em operação desde 23/10/2026** na AWS (us-east-2); falta fechar o G1 depois de 7 dias contínuos (CA-01) |
+| **V0.2 — Pesquisa** | Features, backtester, treino de XGBoost, ablações B0–B7 | Método aprovado (doc 04 v1.0); código ainda não iniciado |
 | **V0.3 — Paper trading** | Opera em simulação, ao vivo, com Risk Manager | Não iniciada. Depende do doc 05 (não escrito) |
 | **V0.4 — Macro** | Notícias e macro como filtro de risco | Pós-MVP |
 
@@ -58,11 +58,11 @@ Fora do pacote: `tests/` (testes automatizados), `infra/` (Terraform da AWS), `s
 
 | Doc | Para que serve | Estado |
 |---|---|---|
-| 01 PRD | O quê e por quê: escopo, hipóteses, decisões | Rascunho v0.6 |
-| 02 SRS | Requisitos detalhados da V0.1 | Rascunho v0.4 |
-| 03 Arquitetura | Como o sistema é montado e roda na AWS | Rascunho v0.3 |
-| 06 Dados e integrações | Formato e comportamento dos dados da Binance | Rascunho v0.3 |
-| 04 IA e pesquisa | Modelos, features, validação | **Não iniciado** |
+| 01 PRD | O quê e por quê: escopo, hipóteses, decisões | Rascunho v0.11 |
+| 02 SRS | Requisitos detalhados da V0.1 | Rascunho v0.6 |
+| 03 Arquitetura | Como o sistema é montado e roda na AWS | Rascunho v0.14 |
+| 06 Dados e integrações | Formato e comportamento dos dados da Binance | Rascunho v0.14 |
+| 04 IA e pesquisa | Modelos, features, validação | **Aprovado v1.0** (26/10/2026) |
 | 05 Trading e risco | Risk Manager, execução simulada | **Não iniciado** |
 | 07 Testes e validação | Critérios de aceitação e plano de testes | **Não iniciado** |
 | 08 Roadmap | Marcos e prazos | **Não iniciado** |
@@ -91,7 +91,7 @@ Para estudar ML: [ml-para-o-projeto.md](ml-para-o-projeto.md).
 
 | ID | Questão | Recomendação atual |
 |---|---|---|
-| PD-07 | Critérios quantitativos de G2 e G3 | Pré-registrar nos docs 04 e 07, **antes** de avaliar o holdout |
+| PD-07 | Critérios quantitativos de G3 (os de G2 estão pré-registrados no doc 04 §10.2) | Pré-registrar no doc 07, **antes** de avaliar o holdout |
 | PD-08 | Paper trading pela testnet ou por simulador local | Simulador local; testnet só para validar integração |
 | PD-09 | A V0.3 depende da V0.2? | O motor não depende; a escolha do modelo sim (G2) |
 | PD-10 | Interface de operação | CLI, relatórios e logs |
@@ -123,7 +123,7 @@ git log --oneline
 
 ## 9. Próximos passos naturais
 
-1. Fechar a V0.1: smoke test na AWS, coleta contínua e relatório de qualidade (G1).
-2. Escrever o **doc 04** (IA e pesquisa), de preferência depois de ler o guia de ML.
-3. Escrever o **doc 07** (testes e validação), incluindo os critérios de G2.
+1. Fechar a V0.1: relatório de qualidade dos 7 dias contínuos (G1), por volta de 30/10/2026.
+2. Documentar a EC2 dedicada dos agregados por minuto (doc 03) e os requisitos da V0.2 (SRS); depois, a etapa 1 do doc 04 §13.
+3. Escrever o **doc 07** (testes e validação), incluindo os critérios de G3.
 4. Renomear o pacote `trader` para `meris`, em commit separado.
