@@ -1,8 +1,8 @@
-# Mapa do projeto MERIS
+# Mapa do projeto MEVIS
 
 > **Não normativo.** Resumo de orientação, escrito em 23/10/2026 e atualizado em 26/10/2026. Em caso de divergência, valem o PRD e os demais documentos numerados. Se algo aqui estiver desatualizado, os documentos mandam.
 
-**MERIS** (*Market Evidence & Research Intelligence System*, DEC-25) é um sistema de pesquisa e execução algorítmica para **BTC/USDT na Binance**. Antes de ser um robô, é um **instrumento de pesquisa**: a pergunta central é se combinar candles, volume, fluxo de negócios e livro de ofertas gera lucro líquido de custos, fora da amostra e melhor que alternativas simples. A resposta "não" é um resultado válido.
+**MEVIS** (*Market Evidence Intelligence System*, DEC-29) é um sistema de pesquisa e execução algorítmica para **BTC/USDT na Binance**. Antes de ser um robô, é um **instrumento de pesquisa**: a pergunta central é se combinar candles, volume, fluxo de negócios e livro de ofertas gera lucro líquido de custos, fora da amostra e melhor que alternativas simples. A resposta "não" é um resultado válido.
 
 ---
 
@@ -37,7 +37,7 @@ Em português: a **coleta** roda 24/7 numa máquina da AWS, **guarda tudo bruto*
 
 ## 3. Mapa do código (`src/trader/`)
 
-> O nome do pacote ainda é `trader`; o renome para `meris` está planejado como commit separado (DEC-25).
+> O nome do pacote ainda é `trader`; o renome para `mevis` está planejado como commit separado (DEC-29).
 
 | Pasta | O que faz |
 |---|---|
@@ -58,7 +58,7 @@ Fora do pacote: `tests/` (testes automatizados), `infra/` (Terraform da AWS), `s
 
 | Doc | Para que serve | Estado |
 |---|---|---|
-| 01 PRD | O quê e por quê: escopo, hipóteses, decisões | Rascunho v0.11 |
+| 01 PRD | O quê e por quê: escopo, hipóteses, decisões | Rascunho v0.12 |
 | 02 SRS | Requisitos detalhados da V0.1 | Rascunho v0.6 |
 | 03 Arquitetura | Como o sistema é montado e roda na AWS | Rascunho v0.14 |
 | 06 Dados e integrações | Formato e comportamento dos dados da Binance | Rascunho v0.14 |
@@ -126,4 +126,4 @@ git log --oneline
 1. Fechar a V0.1: relatório de qualidade dos 7 dias contínuos (G1), por volta de 30/10/2026.
 2. Documentar a EC2 dedicada dos agregados por minuto (doc 03) e os requisitos da V0.2 (SRS); depois, a etapa 1 do doc 04 §13.
 3. Escrever o **doc 07** (testes e validação), incluindo os critérios de G3.
-4. Renomear o pacote `trader` para `meris`, em commit separado.
+4. Renomear o pacote `trader` para `mevis`, em commit separado.

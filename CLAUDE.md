@@ -1,4 +1,4 @@
-# MERIS — Market Evidence & Research Intelligence System
+# MEVIS — Market Evidence Intelligence System
 
 Sistema de pesquisa e execução algorítmica para BTC/USDT na Binance. Fase atual: **V0.1 (Data Engine) em implementação** — índice e status em [docs/README.md](docs/README.md); escopo e decisões em [docs/01-prd.md](docs/01-prd.md); estrutura do código em docs/03-architecture.md §5.
 

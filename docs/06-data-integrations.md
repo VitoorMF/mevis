@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |---|---|
-| Projeto | **MERIS** — Market Evidence & Research Intelligence System |
+| Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 06 — Data & Integrations |
 | Versão | 0.14 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |

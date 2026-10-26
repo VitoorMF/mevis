@@ -1,4 +1,4 @@
-# Guia de ML para o MERIS
+# Guia de ML para o MEVIS
 
 > **Não normativo.** Este guia é material de apoio para entender a V0.2. Quem manda são o PRD (doc 01) e, quando existir, o doc 04. Escrito em 23/10/2026.
 

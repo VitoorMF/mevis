@@ -2,10 +2,10 @@
 
 | Campo | Valor |
 |---|---|
-| Projeto | **MERIS** — Market Evidence & Research Intelligence System |
+| Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 01 — PRD |
-| Versão | 0.11 — rascunho |
-| Status | Decisões até DEC-28; aguardando confirmação da conta AWS e revisão final (§19) |
+| Versão | 0.12 — rascunho |
+| Status | Decisões até DEC-29; aguardando confirmação da conta AWS e revisão final (§19) |
 | Data | 23/10/2026 |
 | Responsável pelo produto | *a preencher* |
 | Fonte | [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -560,10 +560,11 @@ O MVP é aceito quando **todos** os critérios abaixo forem atendidos, **indepen
 | DEC-22 | Infraestrutura como código | Terraform. |
 | DEC-23 | Plano depois dos créditos | t4g.micro sob demanda (~US$ 13/mês em us-east-2), dentro do teto de R$ 100 (DEC-16). O CP-3 confirma com consumo medido e avalia se a V0.3 exige t4g.small. |
 | DEC-24 | Arquitetura | ADR-01 a ADR-12 do doc 03 aprovadas, incluindo alertas por e-mail via SNS (ADR-12). |
-| DEC-25 | Nome do projeto | **MERIS — Market Evidence & Research Intelligence System**. O pacote Python continua `trader` por enquanto. |
+| DEC-25 | Nome do projeto | **MERIS — Market Evidence & Research Intelligence System**. O pacote Python continua `trader` por enquanto. **Substituída por DEC-29.** |
 | DEC-26 | Região AWS | **Ohio (`us-east-2`)**. A conta do projeto (nova experiência da AWS) só aceita essa região, por SCP da organização gerenciada pela AWS. A coleta usa só os endpoints `*.binance.vision`, que respondem dos EUA. Tóquio exigiria passar ao plano pago e ativar os recursos avançados (irreversível) e fica como plano B. Substitui DEC-21. |
 | DEC-27 | Método da V0.2 | Decisões PD-15 a PD-23 do doc 04 §1 (26/10/2026): horizontes de 15 e 60 min; alvo binário líquido de custos; holdout da trilha A de 23/07 a 22/10/2026; holdout da trilha B de 6 semanas coletadas depois do congelamento; latência assumida de 1 s para dados de arquivo; custo base de 0,10% por lado; critérios de G2 (IS-14 a IS-19) pré-registrados no doc 04 §10.2; candles de 2023–2025 como estudo de robustez; agregados por minuto de negócios numa EC2 dedicada e temporária (~US$ 0,60 por execução, créditos). |
 | DEC-28 | Doc 04 aprovado | Doc 04 v1.0 aprovado em 26/10/2026: catálogo de features, baselines B0–B3, regressão logística e XGBoost com grade fixa, validação walk-forward e plano de trabalho da V0.2; minutos com falha descartam o ponto nas janelas de até 60 min e do alvo, e nas janelas de 240 min e 24 h exigem ≥ 95% de minutos válidos. |
+| DEC-29 | Nome do projeto | **MEVIS — Market Evidence Intelligence System** (26/10/2026), antes do primeiro envio ao GitHub. O pacote Python continua `trader`; recursos da AWS e o endereço da página pública não mudam. Substitui DEC-25. |
 
 Permanecem **em aberto**: as pendências de §17.2.
 
@@ -639,6 +640,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | 0.9 | 24/10/2026 | §17.2: PD-15 a PD-23, decisões de método da V0.2 propostas no doc 04. |
 | 0.10 | 26/10/2026 | DEC-27: PD-15 a PD-23 decididas (método da V0.2, doc 04 §1); critérios de G2 pré-registrados (PD-07 parcial); §13.3 aponta para o doc 04 §10.2. |
 | 0.11 | 26/10/2026 | DEC-28: doc 04 aprovado (v1.0). |
+| 0.12 | 26/10/2026 | DEC-29: nome do projeto MEVIS — Market Evidence Intelligence System (substitui DEC-25). |
 
 ---
 

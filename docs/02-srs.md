@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |---|---|
-| Projeto | **MERIS** — Market Evidence & Research Intelligence System |
+| Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 02 — SRS |
 | Versão | 0.6 — rascunho |
 | Escopo desta versão | **V0.1 (Data Engine) detalhada.** V0.2 e V0.3 apenas delimitadas (§9), a detalhar depois dos docs 04 e 05. |

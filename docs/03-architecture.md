@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |---|---|
-| Projeto | **MERIS** — Market Evidence & Research Intelligence System |
+| Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
 | Versão | 0.14 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |

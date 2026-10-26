@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |---|---|
-| Projeto | **MERIS** — Market Evidence & Research Intelligence System |
+| Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 04 — AI & Quantitative Research |
 | Versão | 1.0 — aprovado |
 | Escopo desta versão | Método de pesquisa da V0.2: dados e períodos, formulação do problema, features, baselines, modelos, validação, custos, métricas, critérios de G2 a pré-registrar, registro de experimentos e plano de trabalho. |

@@ -1,6 +1,6 @@
-# MERIS
+# MEVIS
 
-**Market Evidence & Research Intelligence System** — um sistema de pesquisa que coleta, 24 horas por dia, os dados públicos de mercado do par **BTC/USDT na Binance** e vai usá-los para testar, com método, se existe algum sinal útil em minutos.
+**Market Evidence Intelligence System** — um sistema de pesquisa que coleta, 24 horas por dia, os dados públicos de mercado do par **BTC/USDT na Binance** e vai usá-los para testar, com método, se existe algum sinal útil em minutos.
 
 **Status ao vivo da coleta:** https://d3atevbsy0cc9c.cloudfront.net (só métricas do sistema; nenhum preço)
 

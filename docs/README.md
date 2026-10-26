@@ -1,11 +1,11 @@
-# Documentação do MERIS
+# Documentação do MEVIS
 
 Fase atual: **V0.1 (Data Engine) em implementação**, coberta pelos docs 02, 03 e 06. Os docs 04, 05, 07 e 08 vêm em paralelo. Nenhum código deve ser escrito antes de o documento correspondente estar aprovado.
 
 | # | Documento | Status |
 |---|---|---|
 | 00 | [Contexto inicial](00-contexto-inicial.md) (transferência entre agentes) | Referência histórica, não normativa |
-| 01 | [Product Requirements Document (PRD)](01-prd.md) | Rascunho v0.11 |
+| 01 | [Product Requirements Document (PRD)](01-prd.md) | Rascunho v0.12 |
 | 02 | [Software Requirements Specification (SRS)](02-srs.md) | Rascunho v0.6 — V0.1 detalhada; V0.2 e V0.3 delimitadas |
 | 03 | [System Architecture Document](03-architecture.md) | Rascunho v0.14 — Data Engine e AWS (us-east-2); ADRs aprovadas; Terraform em `infra/` |
 | 04 | [AI & Quantitative Research Specification](04-ai-research.md) | **Aprovado v1.0** — método da V0.2 (DEC-27, DEC-28) |
@@ -19,7 +19,7 @@ Fase atual: **V0.1 (Data Engine) em implementação**, coberta pelos docs 02, 03
 | Guia | Para que serve |
 |---|---|
 | [Mapa do projeto](guias/mapa-do-projeto.md) | Visão de uma página: onde estamos, mapa do código e dos docs, o que é decisão sua |
-| [Guia de ML para o MERIS](guias/ml-para-o-projeto.md) | Mínimo de ML para julgar os resultados da V0.2: vocabulário, erros que invalidam tudo, o que estudar |
+| [Guia de ML para o MEVIS](guias/ml-para-o-projeto.md) | Mínimo de ML para julgar os resultados da V0.2: vocabulário, erros que invalidam tudo, o que estudar |
 
 ## Convenções
 
