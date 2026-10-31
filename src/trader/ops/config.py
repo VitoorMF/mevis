@@ -120,6 +120,8 @@ class PipelineConfig:
     public_bucket: str | None = None
     """Bucket da página pública de status (doc 03 §7.7, ADR-13); sem ele, nada é publicado."""
     status_interval_s: float = 40.0
+    top20_gap_s: float = 2.0
+    """Intervalo entre snapshots que vira lacuna na conferência de continuidade (doc 06 §8.1)."""
     trades_row_group: int = 50_000
     books_row_group: int = 2_000
 

@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 02 — SRS |
-| Versão | 0.6 — rascunho |
+| Versão | 0.7 — rascunho |
 | Escopo desta versão | **V0.1 (Data Engine) detalhada.** V0.2 e V0.3 apenas delimitadas (§9), a detalhar depois dos docs 04 e 05. |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -263,8 +263,9 @@ Entidades e atributos mínimos. Tipos físicos, formatos de arquivo e particiona
 | RF-155 | O sistema deve validar a consistência dos registros: preço e quantidade positivos; mínimo ≤ abertura, fechamento ≤ máximo; volume não negativo; melhor compra < melhor venda; níveis de compra decrescentes e de venda crescentes; horário do negócio compatível com o horário de recebimento dentro de uma tolerância. | Must | F-09 | T |
 | RF-156 | O sistema deveria comparar os candles recebidos com os candles reconstruídos a partir dos negócios (RF-171) e registrar divergências. | Should | F-09, F-11, IS-03 | T, A |
 | RF-157 | O sistema deve manter um registro de lacunas (entidade Lacuna), atualizado na detecção e na recuperação. | Must | F-06, F-09 | T |
-| RF-158 | O sistema deve gerar, sob demanda e para qualquer período, um relatório de qualidade com: completude por stream; lacunas por status; duplicatas; anomalias; distribuição do atraso entre horário do evento e de recebimento; offset de relógio; reconexões. | Must | F-09, CA-05 | D |
+| RF-158 | O sistema deve gerar, sob demanda e para qualquer período, um relatório de qualidade com: completude por stream; lacunas por status; duplicatas; anomalias; distribuição do atraso entre horário do evento e de recebimento; offset de relógio; reconexões. Sem o registro de lacunas e sessões do período, o relatório deve falhar com mensagem clara, nunca informar "nenhuma". | Must | F-09, CA-05 | T, D |
 | RF-159 | O sistema deve produzir a **máscara de qualidade** por stream e por minuto, legível pela pesquisa (V0.2) e pelo Risk Manager (V0.3). | Must | F-09, PP-03, RN-005 | T |
+| RF-160 | O pipeline deve conferir, independentemente do coletor e **entre sessões e instâncias**, a continuidade dos ids de negócios e do diferencial do livro e o intervalo entre snapshots top 20, inclusive na virada de hora. Todo buraco sem lacuna correspondente deve ser registrado (RF-157) e seguir a recuperação do canal (RF-146, RF-148). | Must | F-09, IS-01 | T |
 
 ### 4.7 Monitoramento e alertas (F-10)
 
@@ -294,6 +295,7 @@ Entidades e atributos mínimos. Tipos físicos, formatos de arquivo e particiona
 | RF-183 | O comando de status deve mostrar, por stream: estado da conexão, idade da última mensagem e lacunas das últimas 24 h; e, no geral: uso de disco e horário da última replicação. | Must | F-10, US-06 | D |
 | RF-184 | A configuração deve vir de arquivo e de variáveis de ambiente, ser validada na inicialização e impedir o início, com mensagem clara, se for inválida. | Must | RNF-016 | T |
 | RF-185 | Cada sessão deve registrar a versão do código e a configuração efetiva (sem segredos). | Must | IS-09 | I |
+| RF-186 | A troca de versão do coletor só pode parar a instância antiga depois que a nova, **iniciada nesta troca**, estiver recebendo todos os canais; dados de execuções anteriores não contam como prontidão. As duas devem se sobrepor por um tempo mínimo [PROPOSTA: 5 s]. | Must | F-06, IS-01 | T, D |
 
 ### 4.10 Livro de ofertas: diferencial e reconstrução (F-03, F-04)
 
@@ -468,7 +470,7 @@ Desdobramento dos critérios CA-01 a CA-06 do PRD em procedimentos verificáveis
 
 | CA (PRD) | Requisitos | Procedimento de verificação |
 |---|---|---|
-| CA-01 | RF-101–RF-105, RNF-001, RNF-002, RNF-003 | Executar a coleta por 7 dias contínuos na hospedagem definitiva; o relatório de qualidade do período (RF-158) mostra RNF-001 e RNF-002 atendidos. |
+| CA-01 | RF-101–RF-105, RNF-001, RNF-002, RNF-003 | Executar a coleta por 7 dias contínuos na hospedagem definitiva; o relatório de qualidade do período (RF-158) mostra RNF-001 e RNF-002 atendidos, e a conferência de continuidade (RF-160) não encontra buraco sem lacuna registrada. |
 | CA-02 | RF-111–RF-117, RF-157, RNF-005 | Testes de injeção de falha (queda de rede, fim do processo, servidor que não responde a ping) com lacunas registradas e reconexão automática; ao menos uma rotação de 24 h observada sem lacuna. |
 | CA-03 | RF-121–RF-127, RF-131, RF-132 | Inspeção por amostragem dos registros e testes automatizados de deduplicação e de marcas de tempo. |
 | CA-04 | RF-141–RF-145, RF-149 | Importar candles e negócios de um período configurável [PROPOSTA: 90 dias], com checksums verificados e validação aprovada; repetir a importação sem gerar duplicatas. |
@@ -509,10 +511,10 @@ Requisitos da V0.1 que já servem às versões seguintes: replay (RF-134) para a
 | F-06 Resiliência | RF-111–RF-119; RNF-001–RNF-005 | UC-02, UC-03 | CA-01, CA-02 |
 | F-07 Tempo e normalização | RF-121–RF-129; RNF-012 | — | CA-03 |
 | F-08 Persistência | RF-131–RF-139; RNF-004, RNF-010, RNF-011 | UC-09, UC-10 | CA-03, CA-06 |
-| F-09 Qualidade | RF-151–RF-159, RF-194 | UC-06 | CA-05 |
+| F-09 Qualidade | RF-151–RF-160, RF-194 | UC-06 | CA-05 |
 | F-10 Monitoramento | RF-161–RF-166; RNF-018 | UC-07, UC-08 | CA-01 |
 | F-11 Agregações | RF-171–RF-173 | — | IS-03 |
-| Transversal: operação | RF-181–RF-185 | UC-01, UC-07 | — |
+| Transversal: operação | RF-181–RF-186 | UC-01, UC-07 | — |
 | Transversal: segurança e custo | RN-001, RN-012, RN-015; RNF-013–RNF-017, RNF-023–RNF-025 | — | — |
 
 ---
@@ -556,3 +558,4 @@ Nenhuma pendência aberta que afete a V0.1. Resolvidas em 23/10/2026: PD-06 → 
 | 0.4 | 23/10/2026 | PD-13 resolvida (DEC-24). |
 | 0.5 | 23/10/2026 | Ambiente operacional na us-east-2 (DEC-26). Na produção, RF-146 recorre ao arquivo diário, porque `historicalTrades` responde 451 de lá (doc 06 MD-18). |
 | 0.6 | 25/10/2026 | UC-02, fluxo 1a: com o socket ativo, o silêncio de parte dos streams abre a nova sessão antes de encerrar a antiga. |
+| 0.7 | 31/10/2026 | Aprovado em 31/10/2026. Depois de buracos não registrados nas trocas de versão (doc 06 MD-28): RF-160 (continuidade conferida pelo pipeline, entre sessões), RF-186 (prontidão real na troca), RF-158 falha sem o registro de lacunas e sessões; CA-01 inclui a conferência. |

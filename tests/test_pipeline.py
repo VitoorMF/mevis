@@ -127,7 +127,7 @@ def build_scenario(data_dir: Path) -> None:
     date_dir, hour_dir = hour_dirs(HOUR - 1)
     orphan = raw_root(data_dir, "BTCUSDT") / TRADE / date_dir / hour_dir / "S3.jsonl.open"
     orphan.parent.mkdir(parents=True, exist_ok=True)
-    good = encode(RawRecord(START - 10 * s, "S3", 1, TRADE, trade(-5, START - 10 * s)))
+    good = encode(RawRecord(START - 10 * s, "S3", 1, TRADE, trade(-1, START - 10 * s)))
     orphan.write_bytes(good + b'{"r":1,"s":"S3","q":2,"c":"btcusdt@trade","m":{"str')
 
     with StateStore(data_dir / "state.db") as state:
@@ -194,7 +194,7 @@ def test_end_to_end(scenario: tuple[PipelineConfig, Path]) -> None:
     assert report.duplicates[TRADE] == 5
 
     previous = rows(dataset_path(data_dir, "normalized", "trades", "BTCUSDT", HOUR - 1))
-    assert sorted(t["trade_id"] for t in previous) == [-5, 0]
+    assert sorted(t["trade_id"] for t in previous) == [-1, 0]
 
     klines = rows(dataset_path(data_dir, "normalized", "klines_1m", "BTCUSDT", HOUR))
     assert [k["open_ts_us"] for k in klines] == [START]

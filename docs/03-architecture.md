@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.14 — rascunho |
+| Versão | 0.15 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -200,7 +200,8 @@ Se a nova sessão falhar ou não ficar pronta em 60 s, a rotação é adiada em 
 ### 6.3 Pipeline horário (ADR-04)
 
 ```text
-HH:05 ─► fechar órfãos ─► recuperar lacunas ─► comprimir e verificar arquivos fechados ─► registrar no state.db
+HH:05 ─► fechar órfãos ─► comprimir e verificar arquivos fechados ─► registrar no state.db
+         ─► conferir continuidade ─► recuperar lacunas ─► comprimir o recuperado
          para cada hora cujas entradas mudaram:
            normalizar ─► deduplicar ─► validar ─► Parquet + quarentena ─► máscara de qualidade
          exportar datasets operacionais e cópia do state.db
@@ -216,9 +217,11 @@ HH:05 ─► fechar órfãos ─► recuperar lacunas ─► comprimir e verific
 - **Réplica:** interface de armazenamento com implementação em diretório local (desenvolvimento); a implementação no S3 entra com a infraestrutura AWS.
 - **Portável:** lê arquivos brutos (locais ou do S3) e escreve no S3. Pode rodar no MacBook ou em Lambda, caso a instância seja reduzida (DEC-23).
 
+- **Conferência de continuidade (RF-160):** lê os arquivos brutos fechados de negócios, diferencial e top 20 em ordem de id ou de recebimento, juntando todas as sessões da hora, e compara o último valor visto na hora anterior, guardado no `state.db`. Buraco sem lacuna correspondente vira lacuna, com a mesma causa do coletor e sem duplicar as já registradas. Uma lacuna nova refaz a hora pela renormalização automática. É a verificação que independe do processo que gravou os dados.
+
 ### 6.4 Recuperação de lacunas
 
-A recuperação é a primeira etapa do pipeline horário. Ela lê as lacunas abertas no `state.db`, aplica a estratégia do canal (doc 06 §9.1), grava o que obteve na camada bruta (canais `rest:klines` e `archive:trades`) e atualiza o status. O arquivo bruto novo faz a hora ser normalizada de novo na mesma rodada. Lacunas de livro já nascem irrecuperáveis.
+A recuperação roda logo depois da conferência de continuidade, no pipeline horário. Ela lê as lacunas abertas no `state.db`, aplica a estratégia do canal (doc 06 §9.1), grava o que obteve na camada bruta (canais `rest:klines` e `archive:trades`) e atualiza o status. O arquivo bruto novo faz a hora ser normalizada de novo na mesma rodada. Lacunas de livro já nascem irrecuperáveis.
 
 [PROPOSTA, 24/10/2026] Os timers separados previstos antes (`trader-recovery` a cada 5 min, para a REST, e `trader-archive` diário) foram trocados por essa etapa: no host de produção a REST de negócios não responde (doc 06 MD-18), um candle perdido pode esperar até a próxima hora sem prejuízo para a pesquisa, e fica um processo a menos (ADR-01, PP-07). Se a V0.3 precisar de recuperação mais rápida, um timer próprio chama a mesma etapa.
 
@@ -373,12 +376,15 @@ O host não precisa de acesso a repositório Git nem de credenciais de terceiros
 Unidades modelo `trader-collector@a` e `trader-collector@b`:
 
 1. Inicia a cor ociosa com a nova versão (`trader collect --instance <cor>`).
-2. Espera o arquivo de saúde da cor nova (`health/collector-<cor>.json`) mostrar todos os canais recebendo, por até 120 s.
-3. Para e desabilita a cor antiga; habilita a nova. Se a nova não ficar pronta, ela é parada e a antiga continua.
+2. Espera o arquivo de saúde da cor nova (`health/collector-<cor>.json`) mostrar todos os canais recebendo, por até 120 s. (RF-186) O arquivo só vale com `status = running`, `started_ts_us` posterior ao início desta troca e `updated_ts_us` recente.
+3. (RF-186) Mantém as duas cores gravando por mais 5 s.
+4. Para e desabilita a cor antiga; habilita a nova. Se a nova não ficar pronta, ela é parada e a antiga continua.
 
 Durante a sobreposição, as duas gravam em sessões distintas (doc 06 §3.3), e a deduplicação acontece na normalização. Os demais processos só trocam o link `current`.
 
 A cor nova não compara os primeiros dados com as marcas d'água gravadas no estado se outra instância estiver ativa (saúde `running` atualizada há menos de 3 intervalos de saúde): essas marcas ficam alguns segundos para trás e gerariam lacunas falsas, já que a antiga continua gravando até a troca. Pelo mesmo motivo, a cor antiga não regrava as marcas ao parar se a nova estiver ativa. As 3 lacunas falsas da primeira troca (23/10/2026, 23:19 UTC) foram marcadas como `recovered` à mão, com origem na sessão da cor antiga, que tinha os dados; o estado anterior ficou em `ops/state-before-gap-fix.db`.
+
+**Defeito encontrado em 31/10/2026 (doc 06 MD-28).** O `trader-deploy` conferia só `channels[*].messages > 0`, e o arquivo de saúde da cor nova sobra da última execução dela. A espera passava na primeira leitura, e a cor antiga era parada ~2 s antes de a nova conectar. Só a primeira troca escapou, porque a cor nova ainda não tinha arquivo. Como a cor nova ignora as marcas d'água, nenhuma das duas percebia o buraco. **Até a correção ser implantada, nenhuma troca do coletor deve ser feita**; o `trader-deploy` corrigido entra no host antes da primeira troca, pelo SSM e no template do `user_data`.
 
 ### 9.3 Inicialização do host
 
@@ -534,3 +540,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.12 | 25/10/2026 | §6.2 e §11: silêncio de canal com a conexão ativa troca de sessão sem fechar a antiga antes (abre a nova primeiro). |
 | 0.13 | 25/10/2026 | ADR-13 e §7.7: página pública de status só operacional, servida pelo CloudFront; §5 inclui `public/` e o publicador; §7.6 inclui o módulo `public_status`. |
 | 0.14 | 26/10/2026 | ADR-13 e §7.7: a página pública passa a ser atualizada a cada 40 s (antes 15 s); custo das gravações ≈ US$ 0,33/mês. |
+| 0.15 | 31/10/2026 | Aprovado em 31/10/2026. §9.2: defeito da troca do coletor (saúde antiga contada como prontidão) e correção; §6.3: conferência de continuidade no pipeline. |

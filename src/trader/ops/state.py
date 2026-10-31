@@ -83,6 +83,13 @@ CREATE TABLE IF NOT EXISTS hour_stats (
     value             INTEGER NOT NULL,
     PRIMARY KEY (symbol, hour, metric, key)
 );
+CREATE TABLE IF NOT EXISTS continuity_hours (
+    symbol        TEXT NOT NULL,
+    hour          INTEGER NOT NULL,
+    inputs_digest TEXT NOT NULL,
+    marks         TEXT NOT NULL,
+    PRIMARY KEY (symbol, hour)
+);
 CREATE TABLE IF NOT EXISTS backfill_files (
     file_name         TEXT PRIMARY KEY,
     dataset           TEXT NOT NULL,
@@ -173,6 +180,14 @@ class StoredGap:
     gap_id: int
     record: GapRecord
     status: str
+
+
+@dataclass(frozen=True, slots=True)
+class ContinuityMark:
+    """Fim de uma sequência em uma hora (RF-160): último id (sem id no top 20) e seu horário."""
+
+    last_id: int | None
+    last_ts_us: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +309,37 @@ class StateStore:
         """Lacunas cujo intervalo cruza `[start_ts_us, end_ts_us)`."""
         return self._gaps("start_ts_us < ? AND end_ts_us > ?", (end_ts_us, start_ts_us))
 
+    def gaps_of_channels(self, channels: Sequence[str]) -> list[StoredGap]:
+        placeholders = ",".join("?" * len(channels))
+        return self._gaps(f"channel IN ({placeholders})", tuple(channels))
+
+    def continuity_digest(self, symbol: str, hour: int) -> str | None:
+        row = self._db.execute(
+            "SELECT inputs_digest FROM continuity_hours WHERE symbol = ? AND hour = ?",
+            (symbol, hour),
+        ).fetchone()
+        return None if row is None else str(row[0])
+
+    def continuity_marks_before(self, symbol: str, hour: int) -> dict[str, ContinuityMark]:
+        """Marcas da hora conferida mais recente antes de `hour`."""
+        row = self._db.execute(
+            "SELECT marks FROM continuity_hours WHERE symbol = ? AND hour < ?"
+            " ORDER BY hour DESC LIMIT 1",
+            (symbol, hour),
+        ).fetchone()
+        if row is None:
+            return {}
+        return {k: ContinuityMark(*v) for k, v in json.loads(row[0]).items()}
+
+    def set_continuity(
+        self, symbol: str, hour: int, digest: str, marks: dict[str, ContinuityMark]
+    ) -> None:
+        encoded = {k: [m.last_id, m.last_ts_us] for k, m in marks.items()}
+        self._db.execute(
+            "INSERT OR REPLACE INTO continuity_hours VALUES (?, ?, ?, ?)",
+            (symbol, hour, digest, json.dumps(encoded, sort_keys=True)),
+        )
+
     def clock_offsets_between(self, start_ts_us: int, end_ts_us: int) -> list[tuple[int, int]]:
         rows = self._db.execute(
             "SELECT local_ts_us, offset_us FROM clock_offsets"
@@ -348,6 +394,12 @@ class StateStore:
                 "UPDATE raw_files SET deleted_ts_us = ? WHERE rel_path = ?",
                 (deleted_ts_us, rel_path),
             )
+
+    def restore_raw(self, rel_path: str) -> None:
+        """O arquivo voltou ao disco local (`trader reconcile`); a retenção o apaga de novo."""
+        self._db.execute(
+            "UPDATE raw_files SET deleted_ts_us = NULL WHERE rel_path = ?", (rel_path,)
+        )
 
     def register_output(
         self, rel_path: str, hour: int | None, file_sha256: str, ts_us: int

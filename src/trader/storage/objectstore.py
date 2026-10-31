@@ -16,6 +16,10 @@ class ObjectStore(Protocol):
         """Copia `local` para `key` e confirma a integridade pelo SHA-256 dos bytes."""
         ...
 
+    def get(self, key: str, local: Path, sha256: str) -> None:
+        """Traz `key` para `local`, conferindo o SHA-256 dos bytes antes de colocá-lo no lugar."""
+        ...
+
 
 class LocalDirectoryStore:
     """Réplica num diretório local: desenvolvimento e testes."""
@@ -35,6 +39,15 @@ class LocalDirectoryStore:
             replace_atomically(tmp, target)
         except OSError as exc:
             raise StorageError(f"falha ao replicar {key}: {exc}") from exc
+
+    def get(self, key: str, local: Path, sha256: str) -> None:
+        tmp = local.with_name(local.name + ".tmp")
+        try:
+            local.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(self._root / key, tmp)
+        except OSError as exc:
+            raise StorageError(f"falha ao baixar {key}: {exc}") from exc
+        _install(tmp, local, key, sha256)
 
 
 class S3ObjectStore:
@@ -57,3 +70,19 @@ class S3ObjectStore:
                 )
         except (OSError, BotoCoreError, ClientError) as exc:
             raise StorageError(f"falha ao enviar {key} ao S3: {exc}") from exc
+
+    def get(self, key: str, local: Path, sha256: str) -> None:
+        tmp = local.with_name(local.name + ".tmp")
+        try:
+            local.parent.mkdir(parents=True, exist_ok=True)
+            self._client.download_file(self._bucket, self._prefix + key, str(tmp))
+        except (OSError, BotoCoreError, ClientError) as exc:
+            raise StorageError(f"falha ao baixar {key} do S3: {exc}") from exc
+        _install(tmp, local, key, sha256)
+
+
+def _install(tmp: Path, local: Path, key: str, sha256: str) -> None:
+    if file_sha256(tmp) != sha256:
+        tmp.unlink()
+        raise StorageError(f"cópia corrompida: {key}")
+    replace_atomically(tmp, local)

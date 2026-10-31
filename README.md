@@ -35,8 +35,8 @@ flowchart LR
 
 - **Quatro canais:** cada negócio, o candle de 1 minuto, a foto dos 20 melhores níveis do livro a cada 100 ms e as mudanças do livro a cada 100 ms.
 - **Grava antes de interpretar:** cada mensagem é guardada como chegou, com o horário de recebimento. Tudo o mais pode ser reprocessado a partir dela.
-- **Sem lacunas na troca de conexão:** a conexão é renovada a cada 23 h, e também quando um canal fica em silêncio, abrindo a nova antes de fechar a antiga. A implantação de versões troca entre duas instâncias do coletor (a/b) da mesma forma.
-- **Lacunas detectadas e recuperadas:** sequências de ids de negócios e do livro são conferidas ao vivo. O que falta é buscado de volta nos dados públicos da Binance quando existe, e cada minuto de cada canal fica marcado como completo, recuperado ou perdido.
+- **Sem lacunas na troca de conexão:** a conexão é renovada a cada 23 h, e também quando um canal fica em silêncio, abrindo a nova antes de fechar a antiga. A implantação de versões troca entre duas instâncias do coletor (a/b); nas trocas de 23 a 26/10/2026, um defeito abriu buracos de ~2 s, encontrados na conferência da primeira semana ([doc 06 §9.2](docs/06-data-integrations.md)).
+- **Lacunas detectadas e recuperadas:** sequências de ids de negócios e do livro são conferidas ao vivo, dentro de cada instância. O que falta é buscado de volta nos dados públicos da Binance quando existe, e cada minuto de cada canal fica marcado como completo, recuperado ou perdido.
 - **Relógio medido:** o offset em relação ao servidor da Binance é medido com rajadas de pedidos, usando a amostra de menor ida e volta.
 - **Infraestrutura como código:** Terraform na AWS (us-east-2). O servidor não tem portas de entrada (acesso só pelo SSM). Há logs, métricas e 9 alarmes no CloudWatch, com aviso por e-mail.
 - **Histórico importado** dos arquivos públicos da Binance: ~1,4 bilhão de negócios (1 ano) e ~2 milhões de candles de 1 minuto (desde 2023).

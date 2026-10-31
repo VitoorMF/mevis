@@ -220,19 +220,13 @@ if [ -z "$OLD" ] && [ "$START" != "--start" ]; then
   exit 0
 fi
 
+SINCE_US="$(date +%s%6N)"
 systemctl start "trader-collector@$NEW"
-HEALTH="/var/lib/trader/health/collector-$NEW.json"
 for _ in $(seq 1 120); do
-  if /opt/trader/current/bin/python - "$HEALTH" <<'PY'
-import json, sys
-try:
-    channels = json.load(open(sys.argv[1]))["channels"]
-except Exception:
-    sys.exit(1)
-sys.exit(0 if channels and all(c["messages"] > 0 for c in channels.values()) else 1)
-PY
-  then
+  if /opt/trader/current/bin/trader collector-ready --config /etc/trader/trader.toml \
+      --instance "$NEW" --since-us "$SINCE_US"; then
     if [ -n "$OLD" ]; then
+      sleep 5  # as duas gravam juntas antes de parar a antiga (RF-186)
       systemctl stop "trader-collector@$OLD"
       systemctl disable "trader-collector@$OLD"
     fi

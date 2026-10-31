@@ -1,5 +1,5 @@
-"""Linha de comando: `collect`, `status`, `pipeline`, `backfill`, `quality`, `dashboard-data`,
-`status-publisher` e `smoke` (RF-181 a RF-185)."""
+"""Linha de comando: `collect`, `collector-ready`, `status`, `pipeline`, `reconcile`, `backfill`,
+`quality`, `dashboard-data`, `status-publisher` e `smoke` (RF-181 a RF-186)."""
 
 import argparse
 import asyncio
@@ -26,7 +26,7 @@ from trader.ops.config import (
     load_config,
     load_pipeline_config,
 )
-from trader.ops.health import health_files, read_health
+from trader.ops.health import health_files, health_path, is_ready, read_health
 from trader.ops.logs import configure_logging
 from trader.ops.metrics import Metrics, NullMetrics, StatsdMetrics
 from trader.ops.smoke import run_smoke
@@ -44,7 +44,15 @@ from trader.storage.layout import HOUR_US
 from trader.storage.objectstore import LocalDirectoryStore, ObjectStore, S3ObjectStore
 
 STALE_HEALTH_S = 30
-PIPELINE_COMMANDS = ("pipeline", "backfill", "quality", "dashboard-data", "status-publisher")
+_STALE_US = STALE_HEALTH_S * 1_000_000
+PIPELINE_COMMANDS = (
+    "pipeline",
+    "reconcile",
+    "backfill",
+    "quality",
+    "dashboard-data",
+    "status-publisher",
+)
 """Comandos configurados pela tabela `[pipeline]`."""
 
 
@@ -92,6 +100,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     quality.add_argument("--end", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
     quality.add_argument("--json", type=Path, help="grava também o relatório em JSON")
 
+    reconcile = commands.add_parser(
+        "reconcile", help="confere um período que já saiu do disco (doc 06 §9.2)"
+    )
+    reconcile.add_argument("--config", type=Path, help="arquivo TOML com a tabela [pipeline]")
+    reconcile.add_argument("--data-dir", type=Path)
+    reconcile.add_argument("--start", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
+    reconcile.add_argument("--end", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
+    reconcile.add_argument("--log-level", default="INFO")
+
+    ready = commands.add_parser(
+        "collector-ready", help="a instância iniciada nesta troca está recebendo? (RF-186)"
+    )
+    ready.add_argument("--config", type=Path)
+    ready.add_argument("--data-dir", type=Path)
+    ready.add_argument("--instance", required=True)
+    ready.add_argument("--since-us", required=True, type=int, help="início da troca, em µs")
+
     dashboard = commands.add_parser(
         "dashboard-data", help="gera as tabelas do painel da coleta (doc 06 §8.4)"
     )
@@ -134,6 +159,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "pipeline":
         configure_logging(args.log_level)
         return run_pipeline(pipeline_config, rebuild=args.rebuild)
+    if args.command == "reconcile":
+        configure_logging(args.log_level)
+        return run_reconcile(pipeline_config, args.start, args.end)
+    if args.command == "collector-ready":
+        health = read_health(health_path(config.data_dir, args.instance))
+        return 0 if is_ready(health, args.since_us, time.time_ns() // 1000, _STALE_US) else 1
     if args.command == "backfill":
         configure_logging(args.log_level)
         return run_backfill(pipeline_config, args.dataset, args.start, args.end)
@@ -267,6 +298,8 @@ def run_pipeline(config: PipelineConfig, *, rebuild: bool = False) -> int:
         metrics = _metrics(config.statsd_host, config.statsd_port)
         metrics.gauge("ReplicationLagMinutes", report.replication_lag_minutes)
         metrics.close()
+    if report.continuity_gaps:
+        print(f"buracos entre sessões registrados: {report.continuity_gaps}")
     hours = ", ".join(_hour_label(h) for h in report.normalized_hours) or "nenhuma"
     print(f"órfãos fechados: {report.sealed_orphans} · comprimidos: {report.compressed}")
     print(
@@ -307,11 +340,52 @@ def run_backfill(config: PipelineConfig, dataset: str, start: date, end: date) -
     return 1 if report.with_status("rejected") else 0
 
 
+def run_reconcile(config: PipelineConfig, start: date, end: date) -> int:
+    if start > end:
+        print(f"início {start} depois do fim {end}", file=sys.stderr)
+        return 2
+    store = _object_store(config)
+    if store is None:
+        print("reconcile precisa de réplica configurada", file=sys.stderr)
+        return 2
+    start_hour = (start - date(1970, 1, 1)).days * 24
+    end_hour = ((end - date(1970, 1, 1)).days + 1) * 24
+    with (
+        StateStore(config.data_dir / "state.db") as state,
+        httpx.Client(timeout=60.0) as client,
+    ):
+        archive = ArchiveClient(client, config.archive_base_url)
+        recovery = GapRecovery(config, state, client, archive)
+        try:
+            report = HourlyPipeline(config, state, store, recovery).reconcile(
+                start_hour, end_hour, time.time_ns() // 1000
+            )
+        except PipelineBusy as exc:
+            print(str(exc), file=sys.stderr)
+            return 3
+    print(f"arquivos restaurados: {report.restored}")
+    print(f"buracos registrados: {report.continuity_gaps}")
+    print(
+        f"lacunas: recuperadas {report.recovered_gaps} · irrecuperáveis"
+        f" {report.irrecoverable_gaps} · pendentes {report.pending_gaps}"
+    )
+    print(f"horas normalizadas: {len(report.normalized_hours)}")
+    return 0
+
+
 def quality_report(config: PipelineConfig, start: date, end: date, json_path: Path | None) -> int:
     if start > end:
         print(f"início {start} depois do fim {end}", file=sys.stderr)
         return 2
-    with StateStore(config.data_dir / "state.db") as state:
+    db = config.data_dir / "state.db"
+    if not db.exists():
+        print(
+            f"sem {db}: lacunas e sessões seriam omitidas. Em uma cópia do S3, use"
+            " ops/state-backup.db como state.db",
+            file=sys.stderr,
+        )
+        return 2
+    with StateStore(db) as state:
         report = build_report(config.data_dir, state, config.symbol, start, end)
     print("\n".join(report.lines()))
     if json_path is not None:

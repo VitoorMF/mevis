@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.14 — rascunho |
+| Versão | 0.15 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -406,7 +406,7 @@ Regras: checksum verificado antes da importação (RF-143); unidade de tempo con
 | Preço ou quantidade ≤ 0 | Negócios, livro | Rejeitar para quarentena. |
 | Id de negócio repetido com conteúdo idêntico | Negócios | Descartar a repetição (sobreposição na rotação ou recuperação). |
 | Chave repetida com conteúdo diferente | Negócios, candles, top 20 | Fica a primeira cópia recebida; a divergente vai para a quarentena e o minuto é marcado `invalid` (a pesquisa exclui o minuto inteiro). |
-| Salto na sequência de ids | Negócios | Registrar lacuna e recuperar (§9). |
+| Salto na sequência de ids, ao vivo ou na conferência entre sessões do pipeline (RF-160) | Negócios | Registrar lacuna e recuperar (§9). |
 | `recv_ts_us − trade_ts_us − offset` acima de 5 s [PROPOSTA] | Negócios ao vivo | Aceitar e marcar `late` na máscara. |
 | OHLC inconsistente ou volume negativo | Candles | Rejeitar e alertar. |
 | Minuto sem candle fechado | Candles | Registrar lacuna e recuperar via REST. |
@@ -414,8 +414,8 @@ Regras: checksum verificado antes da importação (RF-143); unidade de tempo con
 | Melhor compra ≥ melhor venda | Top 20 | Aceitar e marcar `invalid`. |
 | Níveis fora de ordem | Top 20 | Rejeitar para quarentena. |
 | Regressão de `last_update_id` | Top 20 | Aceitar e marcar `invalid`. |
-| Intervalo entre snapshots > 2 s | Top 20 | Registrar lacuna (irrecuperável). |
-| `U ≠ u anterior + 1` | Diferencial | Registrar lacuna do diferencial e solicitar novo snapshot REST imediato. |
+| Intervalo entre snapshots > 2 s, ao vivo ou na conferência entre sessões (RF-160) | Top 20 | Registrar lacuna (irrecuperável). |
+| `U ≠ u anterior + 1`, ao vivo ou na conferência entre sessões (RF-160) | Diferencial | Registrar lacuna do diferencial; ao vivo, solicitar novo snapshot REST imediato. |
 | Offset de relógio > 250 ms | Sessão | Alerta e marca `low_clock_confidence` nos minutos afetados. |
 
 ### 8.2 Máscara de qualidade
@@ -435,7 +435,7 @@ Se mais de um estado se aplica ao minuto, prevalece o pior. A pesquisa (V0.2) e 
 
 ### 8.3 Relatório de qualidade (RF-158, CA-05)
 
-`trader quality --start AAAA-MM-DD --end AAAA-MM-DD [--json <arquivo>]` cobre os dias UTC completos do período e lê o diretório de dados local.
+`trader quality --start AAAA-MM-DD --end AAAA-MM-DD [--json <arquivo>]` cobre os dias UTC completos do período e lê o diretório de dados local. Sem `state.db` no diretório, falha com mensagem clara, em vez de informar "lacunas: nenhuma" (RF-158).
 
 | Seção | Conteúdo | Fonte |
 |---|---|---|
@@ -494,7 +494,7 @@ Dados recuperados: `origin = rest` ou `archive`, `recv_ts_us` nulo, mesma valida
 
 ### 9.1 Como a recuperação funciona
 
-É a primeira etapa do pipeline horário (doc 03 §6.4), antes da compressão:
+Roda no pipeline horário depois da conferência de continuidade (doc 03 §6.3 e §6.4), e o que ela grava é comprimido em seguida:
 
 1. **Candles** (lacuna `kline_missing` aberta, já encerrada): pede `/api/v3/klines` (peso 2) ao `rest_base_url` só para os minutos ausentes, com horário em µs. A resposta vai para a camada bruta no canal `rest:klines`, dividida pela hora de cada candle. Minuto que a REST também não traz: a lacuna fica `irrecoverable`.
 2. **Negócios** (lacuna `trade_id_jump` aberta): quando o arquivo diário do dia da lacuna sai, ele é baixado com checksum verificado (§7), e as linhas dos ids ausentes vão para a camada bruta no canal `archive:trades`, na hora de cada negócio. O payload traz o nome do arquivo, o SHA-256, a unidade de tempo e os campos da linha. Id que o arquivo oficial também não tem: `irrecoverable`. Arquivo ainda não publicado (HTTP 404): nova tentativa na próxima rodada. `historicalTrades` não é usado: no host de produção ele responde 451 (MD-18).
@@ -503,6 +503,26 @@ Dados recuperados: `origin = rest` ou `archive`, `recv_ts_us` nulo, mesma valida
 5. **Status:** a lacuna passa a `recovered`, com `recovery_origin` = `rest:klines` ou `archive:<arquivo>@<SHA-256>`, ou a `irrecoverable`.
 6. **Falhas** de rede, HTTP 5xx ou 429 não interrompem o pipeline: a lacuna continua aberta e volta na próxima rodada. Depois de um 429, nenhuma outra chamada REST na mesma rodada (RF-145).
 7. **Limite:** lacunas cuja hora já saiu do disco local (mais de 7 dias, §6.2) não são recuperadas automaticamente.
+
+### 9.2 Buracos das trocas de versão (23 a 26/10/2026)
+
+**MD-28 — conferência dos ids da primeira semana (31/10/2026):** de 23/10 22:44 a 31/10 18:00 UTC, 21,5 milhões de negócios normalizados. Das 10 trocas do coletor, 9 deixaram buraco, sem lacuna registrada e sem `missing` na máscara. A causa está no doc 03 §9.2. Depois da última troca (26/10 12:10) não há salto de id de negócio, inclusive nas 5 rotações.
+
+| Troca (UTC) | Negócios ausentes | Ids ausentes do diferencial | Sem dados no livro |
+|---|---:|---:|---:|
+| 23/10 23:19 (primeira; a cor nova ainda não tinha arquivo de saúde) | 0 | 0 | sobreposição |
+| 23/10 23:27 | 84 | 1.249 | 2,3 s |
+| 23/10 23:49 | 68 | 736 | 2,2 s |
+| 24/10 21:09 | 2 | 183 | 2,4 s |
+| 24/10 22:58 | 2 | 322 | 2,3 s |
+| 25/10 22:10 | 5 | 582 | 2,4 s |
+| 26/10 02:42 | 27 | 1.410 | 2,4 s |
+| 26/10 03:09 | 73 | 1.024 | 2,5 s |
+| 26/10 10:55 | 15 | 282 | 2,5 s |
+| 26/10 12:10 | 15 | 540 | 2,4 s |
+| **Total** | **291** | **6.328** | ~22 s |
+
+**Reparo único.** Essas horas já saíram do disco do host (§9.1, item 7). O comando `trader reconcile --start --end`, rodado no host uma vez, baixa do S3 os arquivos brutos das 9 horas afetadas e das vizinhas, aplica a conferência de RF-160, recupera os negócios pelos arquivos diários e normaliza de novo; o que muda é replicado. Os trechos do livro ficam como lacunas irrecuperáveis e `missing` na máscara. Os objetos substituídos no S3 ficam 30 dias como versões não atuais (doc 03 §7.4), e os arquivos brutos originais não mudam. O comando também serve para conferir qualquer período depois.
 
 ---
 
@@ -554,6 +574,7 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | Tamanho real da camada normalizada | V0.1 |
 | Máscara de qualidade para os dias importados pelo backfill (§7) | V0.2, se a pesquisa precisar |
 | Peso exato de `exchangeInfo` | Implementação |
+| Conferir duplicatas do top 20 na semana do G1 (MD-28 conferiu negócios e candles) | Reavaliação do G1 |
 | Termos de uso (§12) | Antes da coleta contínua |
 | Classes de armazenamento mais baratas no S3 | CP-3 (doc 03 §10.4) |
 
@@ -594,3 +615,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.12 | 25/10/2026 | §8.4: tabela de destaques do painel (`highlights.csv`). |
 | 0.13 | 25/10/2026 | §8.5: o que a página pública de status pode e não pode mostrar, com os campos como implementados. |
 | 0.14 | 26/10/2026 | §8.5: `status.json` a cada 40 s. |
+| 0.15 | 31/10/2026 | MD-28 e §9.2: buracos não registrados nas trocas de versão e reparo único; §8.1: conferência entre sessões (RF-160); §8.3: relatório falha sem `state.db`. |

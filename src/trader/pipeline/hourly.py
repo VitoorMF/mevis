@@ -3,14 +3,15 @@
 Etapas, todas idempotentes (reexecutar não duplica nada):
 
 1. fechar arquivos `.open` órfãos (sessão encerrada ou hora vencida há mais que a carência);
-2. recuperar lacunas abertas, gravando o obtido na camada bruta (doc 06 §9.1); uma falha aqui
-   só adia a recuperação, nunca interrompe o pipeline;
-3. comprimir e verificar os arquivos fechados (RF-137) e registrá-los no estado;
-4. normalizar as horas cujas entradas mudaram desde a última execução (RF-133) e gerar a
+2. comprimir e verificar os arquivos fechados (RF-137) e registrá-los no estado;
+3. conferir a continuidade entre sessões e registrar os buracos como lacunas (RF-160);
+4. recuperar lacunas abertas, gravando o obtido na camada bruta (doc 06 §9.1), e comprimir o que
+   veio; uma falha aqui só adia a recuperação, nunca interrompe o pipeline;
+5. normalizar as horas cujas entradas mudaram desde a última execução (RF-133) e gerar a
    máscara de qualidade (RF-159);
-5. exportar os datasets operacionais (doc 06 §5.4) e uma cópia do estado;
-6. replicar no armazenamento durável o que ainda não foi replicado (RF-136);
-7. apagar do disco local o que já foi replicado e passou da retenção (RF-138).
+6. exportar os datasets operacionais (doc 06 §5.4) e uma cópia do estado;
+7. replicar no armazenamento durável o que ainda não foi replicado (RF-136);
+8. apagar do disco local o que já foi replicado e passou da retenção (RF-138).
 
 Uma hora só é normalizada quando todos os seus arquivos brutos estão fechados. Se arquivos
 novos aparecerem depois (vizinhos, recuperações, lacunas detectadas mais tarde), o resumo das
@@ -34,6 +35,7 @@ from trader.core.timeunits import SECOND_US
 from trader.ops.config import PipelineConfig
 from trader.ops.logs import ctx
 from trader.ops.state import RawFileRow, StateStore
+from trader.pipeline.continuity import already_registered, check_hour
 from trader.pipeline.normalize_hour import normalize_hour
 from trader.quality.mask import ClockReference, GapSpan, build_mask
 from trader.recovery.gaps import GapRecovery
@@ -43,6 +45,7 @@ from trader.storage.layout import (
     RECOVERY_CHANNELS,
     RawFile,
     RawState,
+    StorageError,
     channel_dir,
     dataset_path,
     relative,
@@ -74,6 +77,10 @@ class PipelineReport:
     recovered_gaps: int = 0
     irrecoverable_gaps: int = 0
     pending_gaps: int = 0
+    continuity_gaps: int = 0
+    """Buracos achados pela conferência entre sessões, sem lacuna registrada (RF-160)."""
+    restored: int = 0
+    """Arquivos brutos trazidos de volta da réplica (`reconcile`)."""
 
 
 class HourlyPipeline:
@@ -93,14 +100,7 @@ class HourlyPipeline:
     def run(self, now_us: int, *, rebuild: bool = False) -> PipelineReport:
         report = PipelineReport()
         with self._lock():
-            self._seal_orphans(now_us, report)
-            self._recover(now_us, report)
-            self._compress(now_us, report)
-            self._normalize(now_us, report, rebuild=rebuild)
-            self._export_ops(now_us)
-            self._replicate(now_us, report)
-            self._apply_retention(now_us, report)
-            report.replication_lag_minutes = self._replication_lag_minutes(now_us)
+            self._steps(now_us, report, rebuild=rebuild)
         log.info(
             "pipeline concluído",
             extra=ctx(
@@ -112,6 +112,34 @@ class HourlyPipeline:
             ),
         )
         return report
+
+    def reconcile(self, start_hour: int, end_hour: int, now_us: int) -> PipelineReport:
+        """Refaz a conferência de `[start_hour, end_hour)` com arquivos que saíram do disco: traz
+        os brutos de volta da réplica e roda as etapas normais (doc 06 §9.2). A retenção os apaga
+        de novo no fim, depois de replicar o que mudou."""
+        if self._store is None:
+            raise StorageError("reconcile precisa de réplica configurada")
+        report = PipelineReport()
+        with self._lock():
+            where = "deleted_ts_us IS NOT NULL AND hour >= ? AND hour <= ?"
+            for raw in self._state.raw_files(where, (start_hour - 1, end_hour)):
+                self._store.get(raw.rel_path, self._data_dir / raw.rel_path, raw.file_sha256)
+                self._state.restore_raw(raw.rel_path)
+                report.restored += 1
+            self._steps(now_us, report, rebuild=False)
+        return report
+
+    def _steps(self, now_us: int, report: PipelineReport, *, rebuild: bool) -> None:
+        self._seal_orphans(now_us, report)
+        self._compress(now_us, report)
+        self._check_continuity(now_us, report)
+        self._recover(now_us, report)
+        self._compress(now_us, report)
+        self._normalize(now_us, report, rebuild=rebuild)
+        self._export_ops(now_us)
+        self._replicate(now_us, report)
+        self._apply_retention(now_us, report)
+        report.replication_lag_minutes = self._replication_lag_minutes(now_us)
 
     # ------------------------------------------------------------------ etapas
 
@@ -127,6 +155,48 @@ class HourlyPipeline:
                 log.warning(
                     "arquivo órfão fechado", extra=ctx(path=relative(self._data_dir, target))
                 )
+
+    def _check_continuity(self, now_us: int, report: PipelineReport) -> None:
+        streams = self._config.streams
+        checked = {streams[0], streams[2], streams[3]}
+        rows = [r for r in self._state.raw_files() if r.channel_dir in checked]
+        open_hours = {f.hour for f in self._scan(RawState.OPEN) if f.channel_dir in checked}
+        symbol = self._config.symbol
+        limit_us = int(self._config.top20_gap_s * SECOND_US)
+        for hour in sorted({r.hour for r in rows}):
+            if hour in open_hours:
+                break  # as marcas dependem da ordem: as horas seguintes esperam esta fechar
+            inputs = [r for r in rows if r.hour == hour]
+            if any(r.deleted_ts_us is not None for r in inputs):
+                continue
+            previous = self._state.continuity_marks_before(symbol, hour)
+            digest = hashlib.sha256()
+            for row in sorted(inputs, key=lambda r: r.rel_path):
+                digest.update(f"raw|{row.rel_path}|{row.sha256}\n".encode())
+            for channel, mark in sorted(previous.items()):
+                digest.update(f"mark|{channel}|{mark.last_id}|{mark.last_ts_us}\n".encode())
+            inputs_digest = digest.hexdigest()
+            if self._state.continuity_digest(symbol, hour) == inputs_digest:
+                continue
+            paths = [(r.channel_dir, self._data_dir / r.rel_path) for r in inputs]
+            gaps, marks = check_hour(streams, paths, previous, limit_us, now_us)
+            existing = self._state.gaps_of_channels(sorted(checked))
+            for gap in gaps:
+                if already_registered(gap, existing):
+                    continue
+                self._state.record_gap(gap)
+                report.continuity_gaps += 1
+                log.warning(
+                    "buraco entre sessões",
+                    extra=ctx(
+                        channel=gap.channel,
+                        cause=gap.cause,
+                        duration_s=(gap.end_ts_us - gap.start_ts_us) / 1e6,
+                        first_missing_id=gap.first_missing_id,
+                        last_missing_id=gap.last_missing_id,
+                    ),
+                )
+            self._state.set_continuity(symbol, hour, inputs_digest, marks)
 
     def _recover(self, now_us: int, report: PipelineReport) -> None:
         if self._recovery is None:
