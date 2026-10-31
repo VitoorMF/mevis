@@ -10,7 +10,7 @@
 
 | Versão | O que é | Situação |
 |---|---|---|
-| **V0.1 — Data Engine** | Coleta, valida e guarda os dados de mercado | **Em operação desde 23/10/2026** na AWS (us-east-2); falta fechar o G1 depois de 7 dias contínuos (CA-01) |
+| **V0.1 — Data Engine** | Coleta, valida e guarda os dados de mercado | **Em operação desde 23/10/2026** na AWS (us-east-2); **G1 aprovado em 31/10/2026** (DEC-30) |
 | **V0.2 — Pesquisa** | Features, backtester, treino de XGBoost, ablações B0–B7 | Método aprovado (doc 04 v1.0); código ainda não iniciado |
 | **V0.3 — Paper trading** | Opera em simulação, ao vivo, com Risk Manager | Não iniciada. Depende do doc 05 (não escrito) |
 | **V0.4 — Macro** | Notícias e macro como filtro de risco | Pós-MVP |
@@ -123,7 +123,7 @@ git log --oneline
 
 ## 9. Próximos passos naturais
 
-1. Fechar a V0.1: relatório de qualidade dos 7 dias contínuos (G1), por volta de 30/10/2026.
+1. ~~Fechar a V0.1: relatório de qualidade dos 7 dias contínuos (G1).~~ Feito em 31/10/2026.
 2. Documentar a EC2 dedicada dos agregados por minuto (doc 03) e os requisitos da V0.2 (SRS); depois, a etapa 1 do doc 04 §13.
 3. Escrever o **doc 07** (testes e validação), incluindo os critérios de G3.
 4. Renomear o pacote `trader` para `mevis`, em commit separado.

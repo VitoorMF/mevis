@@ -1,6 +1,6 @@
 # MEVIS — Market Evidence Intelligence System
 
-Sistema de pesquisa e execução algorítmica para BTC/USDT na Binance. Fase atual: **V0.1 (Data Engine) em implementação** — índice e status em [docs/README.md](docs/README.md); escopo e decisões em [docs/01-prd.md](docs/01-prd.md); estrutura do código em docs/03-architecture.md §5.
+Sistema de pesquisa e execução algorítmica para BTC/USDT na Binance. Fase atual: **V0.1 (Data Engine) em operação, G1 aprovado (DEC-30); V0.2 a seguir** — índice e status em [docs/README.md](docs/README.md); escopo e decisões em [docs/01-prd.md](docs/01-prd.md); estrutura do código em docs/03-architecture.md §5.
 
 Comandos: `uv run pytest`, `uv run ruff check .`, `uv run mypy`, `uv run trader collect --data-dir data/<nome> --duration <s>`, `uv run trader status --data-dir data/<nome>`, `uv run trader pipeline --data-dir data/<nome> [--replica-dir <dir>]`, `uv run trader backfill --data-dir data/<nome> --dataset trades|klines_1m --start AAAA-MM-DD --end AAAA-MM-DD`, `uv run trader quality --data-dir data/<nome> --start AAAA-MM-DD --end AAAA-MM-DD`, `uv run trader reconcile --config <toml> --start AAAA-MM-DD --end AAAA-MM-DD`, `AWS_PROFILE=trader uv run trader dashboard-data --config data/backfill-mac.toml --data-dir data/dashboard-cache --out data/dashboard`, `uv run trader smoke --duration <s>`. Infraestrutura: `infra/README.md` (Terraform, perfil AWS `trader`).
 

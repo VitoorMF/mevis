@@ -16,7 +16,7 @@ Para a resposta valer, o método foi fixado **antes** de qualquer experimento ([
 
 | Versão | O que entrega | Situação |
 |---|---|---|
-| **V0.1 — Data Engine** | Coleta contínua, validação e armazenamento dos dados | Em operação na AWS desde 23/10/2026 |
+| **V0.1 — Data Engine** | Coleta contínua, validação e armazenamento dos dados | Em operação na AWS desde 23/10/2026; dados aprovados em 31/10/2026 (G1) |
 | **V0.2 — Pesquisa** | Features sem olhar o futuro, backtester com custos, baselines, regressão logística e XGBoost, ablações | Método aprovado; implementação a seguir |
 | **V0.3 — Paper trading** | Operação simulada ao vivo, com gerenciador de risco independente do modelo | Não iniciada |
 | **V0.4 — Macro** | Notícias e macro como filtro de risco | Depois do MVP |

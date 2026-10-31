@@ -4,8 +4,8 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 01 — PRD |
-| Versão | 0.12 — rascunho |
-| Status | Decisões até DEC-29; aguardando confirmação da conta AWS e revisão final (§19) |
+| Versão | 0.13 — rascunho |
+| Status | Decisões até DEC-30; aguardando confirmação da conta AWS e revisão final (§19) |
 | Data | 23/10/2026 |
 | Responsável pelo produto | *a preencher* |
 | Fonte | [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -254,7 +254,7 @@ Ao final do MVP, o produto:
 
 | Gate | Libera | Condição resumida | Critérios detalhados em |
 |---|---|---|---|
-| **G1 — Dados aprovados** | Uso dos dados coletados na V0.2 | CA-01 a CA-06 atendidos. | Doc 06, doc 07 |
+| **G1 — Dados aprovados** | Uso dos dados coletados na V0.2 | CA-01 a CA-06 atendidos. **Aprovado em 31/10/2026 (DEC-30).** | Doc 06, doc 07 |
 | **G2 — Modelo candidato** | Um modelo específico passa a operar em paper trading | Critérios financeiros experimentais **pré-registrados** atendidos (§13.3). | Doc 04, doc 07 |
 | **G3 — Fim do MVP** | Encerramento do MVP e planejamento das próximas versões | CA-01 a CA-20 atendidos. | Doc 07 |
 | **G4 — Capital real** | **Fora do escopo do MVP** | Exigiria documento próprio, revisão de segurança, limites de capital e autorização explícita do responsável pelo produto. | — |
@@ -413,8 +413,8 @@ O sucesso é avaliado em três camadas. As metas marcadas **[PROPOSTA]** são va
 
 | ID | Indicador | Meta |
 |---|---|---|
-| IS-01 | Completude dos dados: proporção de minutos com candle, de intervalos de negócios sem lacuna de identificador e do tempo com livro atualizado. | ≥ 99,5% em janela de 7 dias contínuos; 100% das lacunas detectadas e registradas. [PROPOSTA] |
-| IS-02 | Tempo de recuperação após queda de conexão. | p95 ≤ 30 s até a retomada do recebimento. [PROPOSTA] |
+| IS-01 | Completude dos dados: proporção de minutos com candle, de intervalos de negócios sem lacuna de identificador e do tempo com livro atualizado. | ≥ 99,5% em janela de 7 dias contínuos; 100% das lacunas detectadas e registradas. [DECISÃO] DEC-30 |
+| IS-02 | Tempo de recuperação após queda de conexão. | p95 ≤ 30 s até a retomada do recebimento. [DECISÃO] DEC-30 |
 | IS-03 | Integridade: duplicatas na camada normalizada; divergência entre candles recebidos e candles reconstruídos dos negócios. | Zero duplicatas; divergências documentadas e explicadas. [PROPOSTA] |
 | IS-04 | Estabilidade: operação contínua sem intervenção manual. | ≥ 7 dias na V0.1; ≥ 30 dias na V0.3. [PROPOSTA] |
 | IS-05 | Conformidade de risco. | 100% das intenções avaliadas pelo Risk Manager; zero violações de limites. |
@@ -565,6 +565,7 @@ O MVP é aceito quando **todos** os critérios abaixo forem atendidos, **indepen
 | DEC-27 | Método da V0.2 | Decisões PD-15 a PD-23 do doc 04 §1 (26/10/2026): horizontes de 15 e 60 min; alvo binário líquido de custos; holdout da trilha A de 23/07 a 22/10/2026; holdout da trilha B de 6 semanas coletadas depois do congelamento; latência assumida de 1 s para dados de arquivo; custo base de 0,10% por lado; critérios de G2 (IS-14 a IS-19) pré-registrados no doc 04 §10.2; candles de 2023–2025 como estudo de robustez; agregados por minuto de negócios numa EC2 dedicada e temporária (~US$ 0,60 por execução, créditos). |
 | DEC-28 | Doc 04 aprovado | Doc 04 v1.0 aprovado em 26/10/2026: catálogo de features, baselines B0–B3, regressão logística e XGBoost com grade fixa, validação walk-forward e plano de trabalho da V0.2; minutos com falha descartam o ponto nas janelas de até 60 min e do alvo, e nas janelas de 240 min e 24 h exigem ≥ 95% de minutos válidos. |
 | DEC-29 | Nome do projeto | **MEVIS — Market Evidence Intelligence System** (26/10/2026), antes do primeiro envio ao GitHub. O pacote Python continua `trader`; recursos da AWS e o endereço da página pública não mudam. Substitui DEC-25. |
+| DEC-30 | G1 — dados aprovados | **Aprovado em 31/10/2026**, com CA-01 a CA-06 atendidos na semana de 24 a 30/10/2026 (doc 06 §8.6) e os limites de IS-01 e IS-02 confirmados. Ressalva: ~22 s de livro perdidos em trocas de versão, marcados como `missing` na máscara (doc 06 §9.2). |
 
 Permanecem **em aberto**: as pendências de §17.2.
 
@@ -641,6 +642,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | 0.10 | 26/10/2026 | DEC-27: PD-15 a PD-23 decididas (método da V0.2, doc 04 §1); critérios de G2 pré-registrados (PD-07 parcial); §13.3 aponta para o doc 04 §10.2. |
 | 0.11 | 26/10/2026 | DEC-28: doc 04 aprovado (v1.0). |
 | 0.12 | 26/10/2026 | DEC-29: nome do projeto MEVIS — Market Evidence Intelligence System (substitui DEC-25). |
+| 0.13 | 31/10/2026 | DEC-30: G1 aprovado; limites de IS-01 e IS-02 confirmados. |
 
 ---
 

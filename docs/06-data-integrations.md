@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.15 — rascunho |
+| Versão | 0.16 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -478,6 +478,21 @@ Só métricas do sistema de coleta. **Nunca entram:** preço, volume em dinheiro
 
 Atribuição na página: "Dados de mercado: Binance. Esta página mostra apenas métricas do sistema de coleta." Contagens de eventos (mensagens, negócios recebidos) são operacionais; não há preços nem valores.
 
+### 8.6 Resultado do G1 (24 a 30/10/2026)
+
+Aprovado em 31/10/2026 (DEC-30), depois do reparo de §9.2.
+
+| Critério | Medido |
+|---|---|
+| CA-01 | 168 h com máscara. Completude: negócios e candles 100%, top 20 99,891%, diferencial 99,921%. Duas quedas não planejadas, retomadas em até ~17 s (amostra pequena para um p95). Continuidade de ids de negócios exata, de 23 a 31/10/2026 (21.609.197 negócios). |
+| CA-02 | Quedas registradas e reconectadas; 5 rotações sem buraco; testes de falha na suíte automatizada. |
+| CA-03 | Sem repetição: 20.362.236 negócios, 10.080 candles e 6.013.928 snapshots top 20. |
+| CA-04 | Cargas de MD-26 e MD-27. Repetir a importação sem duplicar foi coberto por teste automatizado, não por uma repetição real da carga. |
+| CA-05 | Relatórios de 3 períodos, 2 deles com lacunas conhecidas. |
+| CA-06 | 113 a 237 MB/dia de bruto comprimido; disco do host em 34%; retenção de 7 dias aplicada. |
+
+Atraso do evento ao recebimento, sem correção de offset: negócios p50 72 ms, p99 119 ms, p99,9 405 ms, máximo 5,4 s; candles p99 174 ms. Relógio: offset mediano +0,2 ms, maior 5,1 ms.
+
 ---
 
 ## 9. Recuperação de falhas por canal
@@ -522,7 +537,9 @@ Roda no pipeline horário depois da conferência de continuidade (doc 03 §6.3 e
 | 26/10 12:10 | 15 | 540 | 2,4 s |
 | **Total** | **291** | **6.328** | ~22 s |
 
-**Reparo único.** Essas horas já saíram do disco do host (§9.1, item 7). O comando `trader reconcile --start --end`, rodado no host uma vez, baixa do S3 os arquivos brutos das 9 horas afetadas e das vizinhas, aplica a conferência de RF-160, recupera os negócios pelos arquivos diários e normaliza de novo; o que muda é replicado. Os trechos do livro ficam como lacunas irrecuperáveis e `missing` na máscara. Os objetos substituídos no S3 ficam 30 dias como versões não atuais (doc 03 §7.4), e os arquivos brutos originais não mudam. O comando também serve para conferir qualquer período depois.
+**Reparo feito em 31/10/2026:** 160 arquivos restaurados, 27 lacunas registradas, 291 negócios recuperados e 20 horas normalizadas de novo.
+
+**Como funciona o reparo.** Essas horas já saíram do disco do host (§9.1, item 7). O comando `trader reconcile --start --end`, rodado no host uma vez, baixa do S3 os arquivos brutos das 9 horas afetadas e das vizinhas, aplica a conferência de RF-160, recupera os negócios pelos arquivos diários e normaliza de novo; o que muda é replicado. Os trechos do livro ficam como lacunas irrecuperáveis e `missing` na máscara. Os objetos substituídos no S3 ficam 30 dias como versões não atuais (doc 03 §7.4), e os arquivos brutos originais não mudam. O comando também serve para conferir qualquer período depois.
 
 ---
 
@@ -574,7 +591,6 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | Tamanho real da camada normalizada | V0.1 |
 | Máscara de qualidade para os dias importados pelo backfill (§7) | V0.2, se a pesquisa precisar |
 | Peso exato de `exchangeInfo` | Implementação |
-| Conferir duplicatas do top 20 na semana do G1 (MD-28 conferiu negócios e candles) | Reavaliação do G1 |
 | Termos de uso (§12) | Antes da coleta contínua |
 | Classes de armazenamento mais baratas no S3 | CP-3 (doc 03 §10.4) |
 
@@ -616,3 +632,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.13 | 25/10/2026 | §8.5: o que a página pública de status pode e não pode mostrar, com os campos como implementados. |
 | 0.14 | 26/10/2026 | §8.5: `status.json` a cada 40 s. |
 | 0.15 | 31/10/2026 | MD-28 e §9.2: buracos não registrados nas trocas de versão e reparo único; §8.1: conferência entre sessões (RF-160); §8.3: relatório falha sem `state.db`. |
+| 0.16 | 31/10/2026 | §8.6: resultado do G1; §9.2: resultado do reparo. |

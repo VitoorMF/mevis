@@ -312,8 +312,8 @@ Entidades e atributos mínimos. Tipos físicos, formatos de arquivo e particiona
 
 | ID | Categoria | Requisito | Origem | Verif. |
 |---|---|---|---|---|
-| RNF-001 | Disponibilidade | A coleta deve estar ativa em ≥ 99,5% do tempo em qualquer janela de 7 dias [PROPOSTA]. | IS-01, CA-01 | A |
-| RNF-002 | Disponibilidade | Após queda de conexão, o recebimento deve ser retomado em até 30 s no p95 [PROPOSTA]. | IS-02 | T, A |
+| RNF-001 | Disponibilidade | A coleta deve estar ativa em ≥ 99,5% do tempo em qualquer janela de 7 dias (DEC-30). | IS-01, CA-01 | A |
+| RNF-002 | Disponibilidade | Após queda de conexão, o recebimento deve ser retomado em até 30 s no p95 (DEC-30). | IS-02 | T, A |
 | RNF-003 | Disponibilidade | O coletor deve iniciar automaticamente com o host e ser reiniciado automaticamente em até 60 s após uma falha do processo [PROPOSTA]. | IS-04 | D |
 | RNF-004 | Confiabilidade | Em falha abrupta do processo, a perda de mensagens já recebidas deve ser de no máximo 5 s [PROPOSTA]. | F-08 | T |
 | RNF-005 | Confiabilidade | Zero lacunas atribuíveis à rotação planejada de conexões. | RF-115 | A |
