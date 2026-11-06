@@ -302,3 +302,61 @@ def test_quality_report_matches_pipeline_output(scenario: tuple[PipelineConfig, 
     ratio = quality.completeness(KLINE)
     assert ratio is not None and ratio < 1
     assert quality.delays["trades"].count == report.rows["trades"]
+
+
+def test_hour_aggregates_follow_mask_and_trades(scenario: tuple[PipelineConfig, Path]) -> None:
+    """Agregados por minuto da hora (doc 06 §5.6; PD-24): um por minuto, status da máscara."""
+    config, replica = scenario
+    run(config, replica, END + 2 * HOUR_US)
+    data_dir = config.data_dir
+
+    minutes = rows(dataset_path(data_dir, "derived", "minute_trades", "BTCUSDT", HOUR))
+    assert [m["minute_ts_us"] for m in minutes] == [START + i * MINUTE_US for i in range(60)]
+    first = minutes[0]
+    assert (first["trade_count"], first["buy_count"]) == (10, 10)
+    assert (first["first_trade_id"], first["last_trade_id"]) == (1, 10)
+    assert first["volume"] == first["buy_volume"] == Decimal("0.0008")
+    assert first["open"] == first["close"] == Decimal("81524.01")  # a cópia divergente do 7 saiu
+    assert first["last_recv_ts_us"] == START + 10 * SECOND_US + 1000
+    assert sum(first["size_bins_count"]) == 10
+    assert first["status"] == "invalid"  # como na máscara
+    assert (minutes[30]["trade_count"], minutes[30]["status"]) == (0, "missing")
+    assert minutes[30]["open"] is None and minutes[30]["last_recv_ts_us"] is None
+    assert minutes[59]["trade_count"] == 1
+    assert {m["source"] for m in minutes} == {"live"}
+
+    book = rows(dataset_path(data_dir, "derived", "minute_book", "BTCUSDT", HOUR))
+    assert len(book) == 60
+    assert book[0]["snapshot_count"] == 2  # o cruzado conta, mas fica fora das medidas
+    assert book[0]["imbalance_1_mean"] == book[0]["imbalance_1_last"] == 0.5
+    assert book[0]["microprice_dist_mean"] == 0.0
+    assert book[0]["status"] == "invalid"
+    assert book[1]["snapshot_count"] == 0 and book[1]["spread_rel_mean"] is None
+
+    replicated = {p.relative_to(replica).as_posix() for p in replica.rglob("*.parquet")}
+    assert {
+        dataset_path(Path(), "derived", name, "BTCUSDT", HOUR).as_posix()
+        for name in ("minute_trades", "minute_book")
+    } <= replicated
+
+
+def test_failed_aggregates_do_not_stop_the_pipeline(
+    scenario: tuple[PipelineConfig, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Falha nos agregados fica no log; normalização e réplica seguem, e a hora é refeita."""
+    config, replica = scenario
+
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        raise MemoryError("teste")
+
+    monkeypatch.setattr("trader.pipeline.hourly.aggregate_live_hour", broken)
+    report = run(config, replica, END + 2 * HOUR_US)
+    assert report.aggregate_failures == 3
+    assert list((replica / "normalized" / "trades").rglob("*.parquet"))  # a réplica seguiu
+    monkeypatch.undo()
+    again = run(config, replica, END + 2 * HOUR_US)
+    assert (again.aggregate_failures, set(again.normalized_hours)) == (
+        0,
+        {HOUR - 1, HOUR, HOUR + 1},
+    )
+    assert dataset_path(config.data_dir, "derived", "minute_trades", "BTCUSDT", HOUR).exists()

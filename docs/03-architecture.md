@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.16 — rascunho |
+| Versão | 0.17 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -206,6 +206,7 @@ HH:05 ─► fechar órfãos ─► comprimir e verificar arquivos fechados ─�
          ─► conferir continuidade ─► recuperar lacunas ─► comprimir o recuperado
          para cada hora cujas entradas mudaram:
            normalizar ─► deduplicar ─► validar ─► Parquet + quarentena ─► máscara de qualidade
+           ─► agregados por minuto (doc 06 §5.6)
          exportar datasets operacionais e cópia do state.db
          replicar o que falta ─► aplicar retenção local
 ```
@@ -219,6 +220,7 @@ HH:05 ─► fechar órfãos ─► comprimir e verificar arquivos fechados ─�
 - **Réplica:** interface de armazenamento com implementação em diretório local (desenvolvimento); a implementação no S3 entra com a infraestrutura AWS.
 - **Portável:** lê arquivos brutos (locais ou do S3) e escreve no S3. Pode rodar no MacBook ou em Lambda, caso a instância seja reduzida (DEC-23).
 
+- **Agregados por minuto (PD-24, DEC-31):** cada hora normalizada gera `minute_trades` e `minute_book`, com o status da máscara. Uma falha aqui não interrompe o pipeline nem a réplica (como na recuperação): fica no log e a hora é refeita na próxima rodada, enquanto as entradas estiverem no disco; depois disso, o `trader aggregates` (§7.8) cobre o período.
 - **Conferência de continuidade (RF-160):** lê os arquivos brutos fechados de negócios, diferencial e top 20 em ordem de id ou de recebimento, juntando todas as sessões da hora, e compara o último valor visto na hora anterior, guardado no `state.db`. Buraco sem lacuna correspondente vira lacuna, com a mesma causa do coletor e sem duplicar as já registradas. Uma lacuna nova refaz a hora pela renormalização automática. É a verificação que independe do processo que gravou os dados.
 
 ### 6.4 Recuperação de lacunas
@@ -365,6 +367,8 @@ MacBook: scripts/run-job.sh aggregates --start AAAA-MM-DD --end AAAA-MM-DD [--ve
   3. A zona da sub-rede (`us-east-2a`) oferece c7g.2xlarge.
 
   O teste de verdade é a primeira execução: se ela for recusada, nada é criado nem cobrado, e as alternativas são o m7i-flex.large (2 vCPU x86, 8 GiB; elegível à camada gratuita, ~4× mais lento) ou o plano B.
+- **Implementado em 06/11/2026, sem `apply`:** módulo `infra/modules/job_runner` (modelo de lançamento, papel, grupo de logs), `scripts/run-job.sh` e `scripts/job-bootstrap.sh`. O `run-job.sh` confere a conta, recusa o holdout, confere que a versão está publicada, mostra o custo e pede confirmação; gera o user_data de cada execução a partir do `job-bootstrap.sh`, com versão e argumentos. O user_data do próprio modelo só desliga a instância, para que um lançamento sem argumentos (pelo console, por engano) não fique ligado. O `s3:ListBucket` do papel fica restrito aos prefixos do job. No fim, o script baixa o manifesto e o log para `data/jobs/<id>/`.
+- **Medição no MacBook (doc 06 MD-29):** o pior dia leva ~10 s e ~0,6 GB por processo. A primeira execução deve durar bem menos que as ~2 h estimadas, dominada pela inicialização e pela leitura do S3; a estimativa de custo continua a mesma até ser medida.
 
 ### 7.6 Terraform (DEC-22, ADR-10)
 
@@ -585,3 +589,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.14 | 26/10/2026 | ADR-13 e §7.7: a página pública passa a ser atualizada a cada 40 s (antes 15 s); custo das gravações ≈ US$ 0,33/mês. |
 | 0.15 | 31/10/2026 | Aprovado em 31/10/2026. §9.2: defeito da troca do coletor (saúde antiga contada como prontidão) e correção; §6.3: conferência de continuidade no pipeline. |
 | 0.16 | 06/11/2026 | Aprovado em 06/11/2026 (DEC-32). ADR-14 e §7.8: instância de processamento sob demanda para os agregados por minuto (PD-23), com plano, cota e zona verificados; §5: pacote `aggregate`; §8, §10 e §13 ajustados. |
+| 0.17 | 06/11/2026 | §6.3: agregados por minuto no pipeline horário; §7.8: implementação do módulo `job_runner` e dos scripts de lançamento (ainda sem `apply`) e medição no MacBook. |

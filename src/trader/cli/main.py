@@ -1,9 +1,10 @@
 """Linha de comando: `collect`, `collector-ready`, `status`, `pipeline`, `reconcile`, `backfill`,
-`quality`, `dashboard-data`, `status-publisher` e `smoke` (RF-181 a RF-186)."""
+`aggregates`, `quality`, `dashboard-data`, `status-publisher` e `smoke` (RF-181 a RF-187)."""
 
 import argparse
 import asyncio
 import json
+import re
 import signal
 import sys
 import threading
@@ -31,6 +32,7 @@ from trader.ops.logs import configure_logging
 from trader.ops.metrics import Metrics, NullMetrics, StatsdMetrics
 from trader.ops.smoke import run_smoke
 from trader.ops.state import StateStore
+from trader.pipeline.aggregates import AggregatesJob, HoldoutRefused, JobOptions, job_store
 from trader.pipeline.backfill import Backfill, BackfillBusy, BackfillReport
 from trader.pipeline.dashboard_data import export, sync_from_s3
 from trader.pipeline.hourly import HourlyPipeline, PipelineBusy
@@ -40,7 +42,7 @@ from trader.recovery.gaps import GapRecovery
 from trader.sources.binance_archive import DATASETS, ArchiveClient, ArchiveError
 from trader.sources.binance_rest import BinanceRest, WeightLimiter
 from trader.sources.binance_ws import websockets_connector
-from trader.storage.layout import HOUR_US
+from trader.storage.layout import HOUR_US, StorageError
 from trader.storage.objectstore import LocalDirectoryStore, ObjectStore, S3ObjectStore
 
 STALE_HEALTH_S = 30
@@ -49,6 +51,7 @@ PIPELINE_COMMANDS = (
     "pipeline",
     "reconcile",
     "backfill",
+    "aggregates",
     "quality",
     "dashboard-data",
     "status-publisher",
@@ -90,6 +93,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     backfill.add_argument("--start", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
     backfill.add_argument("--end", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
     backfill.add_argument("--log-level", default="INFO")
+
+    aggregates = commands.add_parser(
+        "aggregates", help="agregados por minuto de um período (doc 06 §5.6; doc 03 §7.8)"
+    )
+    aggregates.add_argument("--config", type=Path, help="arquivo TOML com a tabela [pipeline]")
+    aggregates.add_argument("--data-dir", type=Path, help="diretório de trabalho")
+    aggregates.add_argument("--replica-dir", type=Path, help="réplica local (desenvolvimento)")
+    aggregates.add_argument("--start", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
+    aggregates.add_argument("--end", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
+    aggregates.add_argument(
+        "--allow-holdout",
+        action="store_true",
+        help="só na avaliação final: permite o holdout da trilha A (RF-179)",
+    )
+    aggregates.add_argument("--workers", type=int, default=1, help="processos em paralelo")
+    aggregates.add_argument("--job-id", help="identificador do manifesto (padrão: data e hora)")
+    aggregates.add_argument("--code-version", help="versão registrada no manifesto")
+    aggregates.add_argument("--log-level", default="INFO")
 
     quality = commands.add_parser(
         "quality", help="relatório de qualidade de um período (doc 06 §8.3)"
@@ -168,6 +189,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "backfill":
         configure_logging(args.log_level)
         return run_backfill(pipeline_config, args.dataset, args.start, args.end)
+    if args.command == "aggregates":
+        configure_logging(args.log_level)
+        return run_aggregates(pipeline_config, args)
     if args.command == "quality":
         return quality_report(pipeline_config, args.start, args.end, args.json)
     if args.command == "dashboard-data":
@@ -300,6 +324,8 @@ def run_pipeline(config: PipelineConfig, *, rebuild: bool = False) -> int:
         metrics.close()
     if report.continuity_gaps:
         print(f"buracos entre sessões registrados: {report.continuity_gaps}")
+    if report.aggregate_failures:
+        print(f"agregados por minuto falharam em {report.aggregate_failures} hora(s); ver o log")
     hours = ", ".join(_hour_label(h) for h in report.normalized_hours) or "nenhuma"
     print(f"órfãos fechados: {report.sealed_orphans} · comprimidos: {report.compressed}")
     print(
@@ -370,6 +396,50 @@ def run_reconcile(config: PipelineConfig, start: date, end: date) -> int:
         f" {report.irrecoverable_gaps} · pendentes {report.pending_gaps}"
     )
     print(f"horas normalizadas: {len(report.normalized_hours)}")
+    return 0
+
+
+def run_aggregates(config: PipelineConfig, args: argparse.Namespace) -> int:
+    job_id = args.job_id or time.strftime("aggregates-%Y%m%dT%H%M%SZ", time.gmtime())
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", job_id) or args.workers < 1:
+        print(
+            "--job-id só com letras, números, ponto, hífen e sublinhado; --workers ≥ 1",
+            file=sys.stderr,
+        )
+        return 2
+    options = JobOptions(
+        start=args.start,
+        end=args.end,
+        job_id=job_id,
+        code_version=args.code_version or version("trader"),
+        allow_holdout=args.allow_holdout,
+        workers=args.workers,
+    )
+    try:
+        report = AggregatesJob(config, job_store(config), options).run()
+    except HoldoutRefused as exc:
+        print(f"recusado: {exc}", file=sys.stderr)
+        return 2
+    except StorageError as exc:
+        print(f"falhou: {exc}. O que foi gravado está completo; rode de novo.", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    manifest = report.manifest
+    units = manifest["units"]
+    print(
+        f"dias de arquivo: {sum(u['kind'] == 'archive' for u in units)}"
+        f" · horas ao vivo: {sum(u['kind'] == 'live' for u in units)}"
+        f" · negócios: {manifest['trades']}"
+    )
+    print(
+        f"saídas: {len(manifest['outputs'])} · duração: {manifest['duration_s']} s"
+        f" · pico de memória por processo: {manifest['max_rss_mb']} MB"
+    )
+    for warning in report.warnings:
+        print(f"aviso: {warning}")
+    print(f"manifesto: {report.manifest_key}")
     return 0
 
 

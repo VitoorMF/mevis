@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import io
 from pathlib import Path
 
 import boto3
@@ -44,3 +45,38 @@ def test_s3_errors_become_storage_errors(tmp_path: Path) -> None:
         stub.add_client_error("put_object", service_error_code="BadDigest", http_status_code=400)
         with pytest.raises(StorageError):
             S3ObjectStore(s3, "trader-data").put(local, "k", hashlib.sha256(b"x").hexdigest())
+
+
+def _body(data: bytes) -> object:
+    from botocore.response import StreamingBody
+
+    return StreamingBody(io.BytesIO(data), len(data))
+
+
+def test_list_keys_pages_and_sorts() -> None:
+    s3 = client()
+    with Stubber(s3) as stub:
+        stub.add_response(
+            "list_objects_v2",
+            {"Contents": [{"Key": "p/b"}, {"Key": "p/a"}], "IsTruncated": False},
+            {"Bucket": "trader-data", "Prefix": "p/"},
+        )
+        assert S3ObjectStore(s3, "trader-data").list_keys("p/") == ["p/a", "p/b"]
+
+
+def test_fetch_checks_the_stored_sha256(tmp_path: Path) -> None:
+    data = b"parquet"
+    good = base64.b64encode(hashlib.sha256(data).digest()).decode()
+    bad = base64.b64encode(hashlib.sha256(b"outro").digest()).decode()
+    s3 = client()
+    expected = {"Bucket": "trader-data", "Key": "k", "ChecksumMode": "ENABLED"}
+    with Stubber(s3) as stub:
+        stub.add_response("get_object", {"Body": _body(data), "ChecksumSHA256": good}, expected)
+        stub.add_response("get_object", {"Body": _body(data), "ChecksumSHA256": bad}, expected)
+        store = S3ObjectStore(s3, "trader-data")
+        assert store.fetch("k", tmp_path / "a") == hashlib.sha256(data).hexdigest()
+        assert (tmp_path / "a").read_bytes() == data
+        with pytest.raises(StorageError, match="corrompida"):
+            store.fetch("k", tmp_path / "b")
+    assert not (tmp_path / "b").exists()
+    assert not (tmp_path / "b.tmp").exists()

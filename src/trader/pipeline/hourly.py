@@ -7,8 +7,8 @@ Etapas, todas idempotentes (reexecutar não duplica nada):
 3. conferir a continuidade entre sessões e registrar os buracos como lacunas (RF-160);
 4. recuperar lacunas abertas, gravando o obtido na camada bruta (doc 06 §9.1), e comprimir o que
    veio; uma falha aqui só adia a recuperação, nunca interrompe o pipeline;
-5. normalizar as horas cujas entradas mudaram desde a última execução (RF-133) e gerar a
-   máscara de qualidade (RF-159);
+5. normalizar as horas cujas entradas mudaram desde a última execução (RF-133), gerar a
+   máscara de qualidade (RF-159) e os agregados por minuto da hora (doc 06 §5.6; PD-24, DEC-31);
 6. exportar os datasets operacionais (doc 06 §5.4) e uma cópia do estado;
 7. replicar no armazenamento durável o que ainda não foi replicado (RF-136);
 8. apagar do disco local o que já foi replicado e passou da retenção (RF-138).
@@ -35,6 +35,7 @@ from trader.core.timeunits import SECOND_US
 from trader.ops.config import PipelineConfig
 from trader.ops.logs import ctx
 from trader.ops.state import RawFileRow, StateStore
+from trader.pipeline.aggregates import aggregate_live_hour
 from trader.pipeline.continuity import already_registered, check_hour
 from trader.pipeline.normalize_hour import normalize_hour
 from trader.quality.mask import ClockReference, GapSpan, build_mask
@@ -81,6 +82,8 @@ class PipelineReport:
     """Buracos achados pela conferência entre sessões, sem lacuna registrada (RF-160)."""
     restored: int = 0
     """Arquivos brutos trazidos de volta da réplica (`reconcile`)."""
+    aggregate_failures: int = 0
+    """Horas cujos agregados por minuto falharam; são refeitas na próxima rodada."""
 
 
 class HourlyPipeline:
@@ -284,7 +287,8 @@ class HourlyPipeline:
                     for row in mask
                 ],
             )
-            for path in [*result.outputs, mask_path]:
+            aggregates = self._aggregate(hour, report)
+            for path in [*result.outputs, mask_path, *aggregates]:
                 self._state.register_output(
                     relative(self._data_dir, path), hour, file_sha256(path), now_us
                 )
@@ -299,11 +303,31 @@ class HourlyPipeline:
                     **{("quarantined", k): v for k, v in result.quarantined.items()},
                 },
             )
-            self._state.set_normalized(self._config.symbol, hour, digest, now_us)
+            if aggregates:  # sem os agregados, a hora é refeita na próxima rodada
+                self._state.set_normalized(self._config.symbol, hour, digest, now_us)
             report.normalized_hours.append(hour)
             report.rows.update(result.rows)
             report.duplicates.update(result.duplicates)
             report.quarantined += sum(result.quarantined.values())
+
+    def _aggregate(self, hour: int, report: PipelineReport) -> list[Path]:
+        """Agregados por minuto da hora (doc 06 §5.6). Como a recuperação, uma falha aqui não
+        interrompe o pipeline nem a réplica: fica no log e a hora é refeita na próxima rodada."""
+        trade_channel, _, top20_channel, _ = self._config.streams
+        try:
+            result = aggregate_live_hour(
+                self._data_dir,
+                self._config.symbol,
+                hour,
+                trade_channel=trade_channel,
+                top20_channel=top20_channel,
+                batch_rows=self._config.trades_row_group,
+            )
+        except Exception as exc:
+            report.aggregate_failures += 1
+            log.error("agregados da hora falharam", extra=ctx(hour=hour, error=repr(exc)))
+            return []
+        return result.outputs
 
     def _export_ops(self, now_us: int) -> None:
         directory = self._data_dir / "derived" / "ops"

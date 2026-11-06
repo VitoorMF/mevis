@@ -70,3 +70,13 @@ module "collector_host" {
   public_bucket_arn   = module.public_status.bucket_arn
   public_bucket_name  = module.public_status.bucket_name
 }
+
+# Processamento sob demanda (doc 03 §7.8, ADR-14): parado, não custa nada; lançado por
+# scripts/run-job.sh, com a estimativa de custo confirmada pelo operador.
+module "job_runner" {
+  source            = "../../modules/job_runner"
+  name              = local.name
+  subnet_id         = module.network.subnet_id
+  security_group_id = module.network.security_group_id
+  bucket_arn        = module.data_bucket.arn
+}

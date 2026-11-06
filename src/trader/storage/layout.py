@@ -99,11 +99,14 @@ def quarantine_path(data_dir: Path, symbol: str, hour: int) -> Path:
     ) / "normalize.jsonl.zst"
 
 
-def archive_dataset_path(data_dir: Path, dataset: str, symbol: str, day: date) -> Path:
-    """Dia importado pelo backfill: `normalized/<dataset>/symbol=X/date=…/archive.parquet`."""
+def archive_dataset_path(
+    data_dir: Path, dataset: str, symbol: str, day: date, layer: str = "normalized"
+) -> Path:
+    """Dia importado pelo backfill: `normalized/<dataset>/symbol=X/date=…/archive.parquet`; os
+    agregados desse dia ficam no mesmo formato em `derived/` (doc 06 §5.6)."""
     return (
         data_dir
-        / "normalized"
+        / layer
         / dataset
         / f"symbol={symbol}"
         / f"date={day:%Y-%m-%d}"

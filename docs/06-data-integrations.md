@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.17 — rascunho |
+| Versão | 0.18 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -380,6 +380,16 @@ As medidas do livro são razões e já ficam em FLOAT64; é a única exceção �
 
 **Determinismo (RF-173).** Ordem fixa das linhas e dos arquivos de entrada; as somas em DECIMAL não dependem da ordem; as médias em FLOAT64 somam os snapshots em ordem de `recv_ts_us`. Duas execuções sobre as mesmas entradas geram o mesmo conteúdo.
 
+**Implementação (06/11/2026).** Pacote `trader/aggregate` (sem E/S), chamado pelo pipeline horário para cada hora normalizada e pelo comando `trader aggregates` para períodos (doc 03 §7.8). Detalhes que o texto acima não fixava:
+
+- **Arquivo:** os minutos dos dois negócios de um salto de id também ficam `missing`, porque os ids ausentes podem estar em qualquer um deles; um minuto com id ausente entre os seus próprios negócios também. Na virada do dia, o job confere o último negócio de um dia com o primeiro do seguinte; um vizinho fora do período ou no holdout fica registrado como aviso no manifesto.
+- **`last_recv_ts_us`:** negócios recuperados do arquivo (§9.1) não têm `recv_ts_us` e ficam fora do máximo; a coluna é nula num minuto sem negócios ou só com recuperados. Como tratar esse nulo na disponibilidade fica para a biblioteca de features (etapa 2).
+- **`snapshot_count`:** conta todos os snapshots do minuto, inclusive os cruzados, que ficam fora das medidas.
+- **`symbol`:** as duas tabelas têm a coluna, como as camadas normalizadas.
+- **Faixa de tamanho:** calculada com limites inteiros exatos (`n⁴ ≥ 2^b × 10³²`, em unidades de 10⁻⁸ BTC), não com o logaritmo de cada máquina.
+
+**MD-29 — validação e medição dos agregados (06/11/2026, MacBook):** nas horas ao vivo de 24 a 31/10/2026 do cache local, `minute_trades` bate exatamente com os candles de 1 minuto recebidos da Binance em todos os 11.399 minutos com candle (contagem, volume, volume comprador, OHLC e primeiro e último id). Um dia sintético de arquivo com 15,4 milhões de negócios (o tamanho do pior dia, MD-27) foi agregado em 9,7 s com pico de 585 MB no processo (RNF-027: até 2 GiB); duas execuções geraram o mesmo arquivo (mesmo SHA-256), de ~0,5 MB. As horas ao vivo levam ~1 s por dia de negócios e ~9 s por dia de livro.
+
 ---
 
 ## 6. Ciclo de vida, retenção e custo
@@ -693,3 +703,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.15 | 31/10/2026 | MD-28 e §9.2: buracos não registrados nas trocas de versão e reparo único; §8.1: conferência entre sessões (RF-160); §8.3: relatório falha sem `state.db`. |
 | 0.16 | 31/10/2026 | §8.6: resultado do G1; §9.2: resultado do reparo. |
 | 0.17 | 06/11/2026 | Aprovado em 06/11/2026 (DEC-32). §5.6: agregados por minuto de negócios e do livro (esquemas, faixas de tamanho, status e disponibilidade); §6.3: volume. |
+| 0.18 | 06/11/2026 | §5.6: implementação, detalhes de interpretação e MD-29 (validação contra os candles e medição do pior dia). |
