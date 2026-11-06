@@ -4,8 +4,8 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 01 — PRD |
-| Versão | 0.13 — rascunho |
-| Status | Decisões até DEC-30; aguardando confirmação da conta AWS e revisão final (§19) |
+| Versão | 0.14 — rascunho |
+| Status | Decisões até DEC-32; aguardando confirmação da conta AWS e revisão final (§19) |
 | Data | 23/10/2026 |
 | Responsável pelo produto | *a preencher* |
 | Fonte | [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -566,6 +566,8 @@ O MVP é aceito quando **todos** os critérios abaixo forem atendidos, **indepen
 | DEC-28 | Doc 04 aprovado | Doc 04 v1.0 aprovado em 26/10/2026: catálogo de features, baselines B0–B3, regressão logística e XGBoost com grade fixa, validação walk-forward e plano de trabalho da V0.2; minutos com falha descartam o ponto nas janelas de até 60 min e do alvo, e nas janelas de 240 min e 24 h exigem ≥ 95% de minutos válidos. |
 | DEC-29 | Nome do projeto | **MEVIS — Market Evidence Intelligence System** (26/10/2026), antes do primeiro envio ao GitHub. O pacote Python continua `trader`; recursos da AWS e o endereço da página pública não mudam. Substitui DEC-25. |
 | DEC-30 | G1 — dados aprovados | **Aprovado em 31/10/2026**, com CA-01 a CA-06 atendidos na semana de 24 a 30/10/2026 (doc 06 §8.6) e os limites de IS-01 e IS-02 confirmados. Ressalva: ~22 s de livro perdidos em trocas de versão, marcados como `missing` na máscara (doc 06 §9.2). |
+| DEC-31 | Agregados por minuto (etapa 1 da V0.2) | Decisões PD-24 a PD-26 (06/11/2026): histórico na instância sob demanda e horas novas no pipeline horário do host; tamanho dos negócios guardado como histograma por minuto em faixas de ~19%; holdout da trilha A agregado só na avaliação final. |
+| DEC-32 | Etapa 1 da V0.2 aprovada | Requisitos (SRS v0.8: RF-172 a RF-179, RF-187, RNF-027), arquitetura da instância de processamento sob demanda (doc 03 §7.8, ADR-14) e esquema dos agregados por minuto (doc 06 §5.6), aprovados em 06/11/2026 com o tipo c7g.2xlarge verificado. |
 
 Permanecem **em aberto**: as pendências de §17.2.
 
@@ -597,6 +599,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | PD-01 | 23/10/2026 | DEC-25 — MERIS. |
 | PD-07 (parcial) | 26/10/2026 | DEC-27 — critérios de G2 pré-registrados no doc 04 §10.2; G3 continua em PD-07. |
 | PD-15 a PD-23 | 26/10/2026 | DEC-27 — método da V0.2 (doc 04 §1). |
+| PD-24 a PD-26 | 06/11/2026 | DEC-31 — agregados por minuto (doc 06 §5.6; doc 03 §7.8). |
 
 ---
 
@@ -643,6 +646,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | 0.11 | 26/10/2026 | DEC-28: doc 04 aprovado (v1.0). |
 | 0.12 | 26/10/2026 | DEC-29: nome do projeto MEVIS — Market Evidence Intelligence System (substitui DEC-25). |
 | 0.13 | 31/10/2026 | DEC-30: G1 aprovado; limites de IS-01 e IS-02 confirmados. |
+| 0.14 | 06/11/2026 | PD-24 a PD-26 propostas e decididas no mesmo dia (DEC-31): agregados por minuto da etapa 1 da V0.2. DEC-32: etapa 1 aprovada. |
 
 ---
 

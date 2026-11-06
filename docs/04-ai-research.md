@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 04 — AI & Quantitative Research |
-| Versão | 1.1 — aprovado |
+| Versão | 1.2 — aprovado |
 | Escopo desta versão | Método de pesquisa da V0.2: dados e períodos, formulação do problema, features, baselines, modelos, validação, custos, métricas, critérios de G2 a pré-registrar, registro de experimentos e plano de trabalho. |
 | Status | Aprovado em 26/10/2026 (DEC-28). Decisões PD-15 a PD-23 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
 | Data | 26/10/2026 |
@@ -336,8 +336,8 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | Item | Onde se resolve |
 |---|---|
 | Taxa de spot da Binance em vigor | [A VERIFICAR] antes da etapa 4 |
-| Plano gratuito libera instâncias c7g (PD-23) | [A VERIFICAR] com `run-instances --dry-run` antes da etapa 1 |
-| Seção da EC2 dedicada (rede, IAM, lançamento) | Doc 03, antes da etapa 1 |
+| Plano gratuito libera instâncias c7g (PD-23) | **Resolvido em 06/11/2026:** `run-instances --dry-run` aceito; cota de 16 vCPUs (doc 03 §7.8) |
+| Seção da EC2 dedicada (rede, IAM, lançamento) | Aprovada no doc 03 §7.8 (06/11/2026, DEC-32) |
 | Franquia de saída de dados do S3 no plano gratuito | [A VERIFICAR] só se o plano B (MacBook) for usado |
 | p99 do atraso ao vivo (PD-19) | **Resolvido:** 119 ms em negócios e 174 ms em candles na semana do CA-01 (doc 06 §8.6); L = 1 s mantida |
 | Modelo de preenchimento final e limites de drawdown | Doc 05 |
@@ -371,3 +371,4 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | 0.2 | 26/10/2026 | PD-15 a PD-23 decididas (§1): 15 e 60 min, alvo binário líquido, holdout A de 3 meses, holdout B de 6 semanas depois do congelamento, L = 1 s, custo base 0,10% por lado, critérios de G2 pré-registrados, candles de 2023–2025 como robustez, agregados por minuto numa EC2 dedicada e temporária. |
 | 1.0 | 26/10/2026 | Aprovado (DEC-28): catálogo de features, baselines, modelos e grade, validação e plano. §3.4 e §5.1: janelas de até 60 min e do alvo continuam estritas; janelas de 240 min e 24 h usam só minutos válidos e exigem ≥ 95% deles. |
 | 1.1 | 31/10/2026 | Pendência do p99 (PD-19) resolvida com a medição da semana do G1; L = 1 s mantida. Método sem mudança. |
+| 1.2 | 06/11/2026 | Pendências da PD-23 atualizadas: c7g verificado; seção da EC2 escrita no doc 03 §7.8. Método sem mudança. |

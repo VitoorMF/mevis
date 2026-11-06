@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.16 — rascunho |
+| Versão | 0.17 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -322,6 +322,64 @@ Repetição do mesmo `last_update_id` mantém a primeira ocorrência (SRS §3). 
 - Cada dataset tem `schema_version` próprio, começando em 1.
 - Mudança de esquema: nova versão, registro no histórico deste documento e reprocessamento a partir da bruta (RF-129). Versões antigas não são misturadas no mesmo arquivo.
 
+### 5.6 Agregados por minuto (V0.2)
+
+Entrada das features de fluxo (B6) e do livro (B7) do doc 04 §5.2. Resumem cada minuto UTC sem perder o que as features precisam; com eles, a pesquisa no MacBook não precisa dos negócios brutos (doc 04 §12). Mesmo código no lote histórico, no pipeline do host e, na V0.3, na operação (PP-05).
+
+**Partição.** `derived/minute_trades/symbol=…/date=…/archive.parquet` para os dias importados pelo backfill e `…/HH.parquet` para as horas da coleta ao vivo, como na camada normalizada; `derived/minute_book/` só tem horas ao vivo. Uma linha por minuto, inclusive sem negócios, para que a ausência de linha signifique "não calculado".
+
+#### `minute_trades` — chave (`symbol`, `minute_ts_us`)
+
+| Coluna | Tipo | Conteúdo |
+|---|---|---|
+| `minute_ts_us` | INT64 | Abertura do minuto, pelo `trade_ts_us` dos negócios |
+| `trade_count`, `buy_count` | INT64 | Negócios no minuto; com agressor comprador (`aggressor = B`) |
+| `volume`, `buy_volume` | DECIMAL(38,8) | Soma de `qty`; idem com agressor comprador. Venda = total − compra |
+| `quote_volume`, `buy_quote_volume` | DECIMAL(38,8) | Soma de `quote_qty`. VWAP = `quote_volume / volume` |
+| `open`, `high`, `low`, `close` | DECIMAL(18,8), nulo | Candle reconstruído dos negócios (RF-171); nulo sem negócios |
+| `first_trade_id`, `last_trade_id` | INT64, nulo | Para conferir a continuidade entre minutos e dias |
+| `last_recv_ts_us` | INT64, nulo | Ao vivo: maior `recv_ts_us` entre os negócios do minuto. Arquivo: nulo |
+| `size_bins_count` | LIST<INT32> (101 itens) | Negócios por faixa de tamanho (PD-25, DEC-31) |
+| `size_bins_volume` | LIST<DECIMAL(38,8)> (101 itens) | Volume por faixa de tamanho |
+| `status` | STRING | Abaixo |
+| `source` | `live` ou `archive` | De onde vieram os negócios |
+| `schema_version` | INT32 | 1 |
+
+**Faixas de tamanho (PD-25, DEC-31).** Faixa `b = floor(4 × log2(qty))`, limitada a [−68, 32], ou seja, de ~8 µBTC (abaixo do mínimo da Binance) a 256 BTC, com 4 faixas por potência de 2. Índice na lista: `b + 68`. A largura de cada faixa é de ~19%, e esse é o erro máximo do limite "percentil 95 das 24 h anteriores" de B6, calculado somando as faixas dos 1.440 minutos anteriores.
+
+**Status de `minute_trades`.**
+
+- **Ao vivo:** o status do canal de negócios na máscara de qualidade (§8.2).
+- **Arquivo** (sem máscara, §7): `ok` se os ids continuam do último negócio do minuto anterior com negócios até o primeiro deste, inclusive na virada do dia; `missing` em todos os minutos entre os dois negócios de um salto de id. Minuto sem negócios e sem salto fica `ok`, com contagem zero.
+
+**Disponibilidade (doc 04 §3.5).** O agregado do minuto só pode ser usado numa decisão em `t_d` se `last_recv_ts_us ≤ t_d` (ao vivo) ou `minute_ts_us + 60 s + L ≤ t_d` (arquivo). Um negócio do minuto recebido depois de `t_d` torna o minuto indisponível para aquela decisão, sem recortar o agregado.
+
+#### `minute_book` — chave (`symbol`, `minute_ts_us`)
+
+Calculado dos snapshots top 20 (§5.4), atribuídos ao minuto do `recv_ts_us`.
+
+| Coluna | Tipo | Conteúdo |
+|---|---|---|
+| `minute_ts_us` | INT64 | Abertura do minuto, pelo `recv_ts_us` |
+| `snapshot_count` | INT32 | Snapshots no minuto |
+| `last_recv_ts_us` | INT64, nulo | Último recebimento no minuto |
+| `<medida>_mean`, `<medida>_min`, `<medida>_last` | FLOAT64, nulo | Para cada medida abaixo |
+| `status` | STRING | Status do canal top 20 na máscara |
+| `schema_version` | INT32 | 1 |
+
+Medidas, com `b₁`, `a₁` os melhores preços e `qb_k`, `qa_k` as quantidades até o nível k:
+
+| Medida | Definição |
+|---|---|
+| `spread_rel` | `(a₁ − b₁) / mid`, com `mid = (a₁ + b₁) / 2` |
+| `imbalance_1` | `qb₁ / (qb₁ + qa₁)` |
+| `imbalance_5`, `imbalance_10`, `imbalance_20` | O mesmo com as quantidades somadas até o nível 5, 10 e 20 |
+| `microprice_dist` | `(microprice − mid) / mid`, com `microprice = (a₁·qb₁ + b₁·qa₁) / (qb₁ + qa₁)` |
+
+As medidas do livro são razões e já ficam em FLOAT64; é a única exceção à regra de decimais até as features (§5.3), porque nenhuma delas é somada nem comparada com preço. Snapshots com livro cruzado (marcados `invalid`, §8.1) ficam fora das medidas e fazem o minuto herdar o status da máscara.
+
+**Determinismo (RF-173).** Ordem fixa das linhas e dos arquivos de entrada; as somas em DECIMAL não dependem da ordem; as médias em FLOAT64 somam os snapshots em ordem de `recv_ts_us`. Duas execuções sobre as mesmas entradas geram o mesmo conteúdo.
+
 ---
 
 ## 6. Ciclo de vida, retenção e custo
@@ -354,6 +412,7 @@ A transição para classes de armazenamento mais baratas no S3 (por idade) será
 | Bruta comprimida | ~170 MB (pico ~260 MB) | ~5,2 GB | ~62 GB |
 | Normalizada + derivada [ESTIMATIVA, medir na V0.1] | ~80 MB | ~2,4 GB | ~14 GB (6 meses retidos) |
 | Backfill (§7), carga única | — | — | 11,9 GB de negócios (MD-27) e ~0,1 GB de candles |
+| Agregados por minuto (§5.6) [ESTIMATIVA] | ~0,3 MB | ~10 MB | ~0,2 GB, incluindo o histórico |
 | **Total** | **~250 MB** | **~7,6 GB** | **~85 GB** |
 
 Custo de armazenamento S3 Standard ao fim de 12 meses na us-east-2 (US$ 0,023/GB-mês, DEC-26): cerca de US$ 1,96 por mês (doc 03 §10). Requisições de gravação (dezenas de arquivos por hora) custam centavos por mês. A transferência para o MacBook entra na franquia mensal de saída para a internet [A VERIFICAR].
@@ -633,3 +692,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.14 | 26/10/2026 | §8.5: `status.json` a cada 40 s. |
 | 0.15 | 31/10/2026 | MD-28 e §9.2: buracos não registrados nas trocas de versão e reparo único; §8.1: conferência entre sessões (RF-160); §8.3: relatório falha sem `state.db`. |
 | 0.16 | 31/10/2026 | §8.6: resultado do G1; §9.2: resultado do reparo. |
+| 0.17 | 06/11/2026 | Aprovado em 06/11/2026 (DEC-32). §5.6: agregados por minuto de negócios e do livro (esquemas, faixas de tamanho, status e disponibilidade); §6.3: volume. |

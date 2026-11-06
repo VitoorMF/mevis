@@ -4,8 +4,8 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 02 — SRS |
-| Versão | 0.7 — rascunho |
-| Escopo desta versão | **V0.1 (Data Engine) detalhada.** V0.2 e V0.3 apenas delimitadas (§9), a detalhar depois dos docs 04 e 05. |
+| Versão | 0.8 — rascunho |
+| Escopo desta versão | **V0.1 (Data Engine) detalhada**, mais os agregados por minuto da etapa 1 da V0.2 (§4.8). O resto da V0.2 e a V0.3 apenas delimitados (§9). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.6; [03 — Architecture](03-architecture.md) v0.2; [06 — Data & Integrations](06-data-integrations.md) v0.2; [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -283,8 +283,14 @@ Entidades e atributos mínimos. Tipos físicos, formatos de arquivo e particiona
 | ID | Requisito | Prior. | Origem | Verif. |
 |---|---|---|---|---|
 | RF-171 | O sistema deveria reconstruir candles de 1 minuto a partir dos negócios normalizados. | Should | F-11 | T |
-| RF-172 | O sistema deveria calcular, por intervalo: volume total, volume com agressor comprador, volume com agressor vendedor, número de negócios e VWAP. | Should | F-11 | T |
-| RF-173 | As agregações deveriam ser determinísticas e reproduzíveis a partir da camada normalizada. | Should | F-11, PP-05 | T |
+| RF-172 | O sistema deve calcular, por minuto UTC: volume total, volume com agressor comprador, volume com agressor vendedor, número de negócios e VWAP (`minute_trades`, doc 06 §5.6). | Must | F-11, doc 04 §5.2 | T |
+| RF-173 | As agregações devem ser determinísticas e reproduzíveis a partir da camada normalizada: as mesmas entradas e a mesma versão do código geram o mesmo conteúdo. | Must | F-11, PP-05, CA-07 | T |
+| RF-174 | O sistema deve calcular, por minuto, a distribuição dos negócios em faixas de tamanho (contagem e volume por faixa), suficiente para o limite de negócios grandes de B6 (doc 06 §5.6; DEC-31). | Must | doc 04 §5.2 | T |
+| RF-175 | O sistema deve calcular, por minuto, as medidas do livro top 20 (spread relativo, desequilíbrios de 1, 5, 10 e 20 níveis, distância do microprice), com média, mínimo e último valor (`minute_book`, doc 06 §5.6). | Must | doc 04 §5.2 (B7) | T |
+| RF-176 | Cada minuto agregado deve ter um status: o da máscara de qualidade, para dados ao vivo; para dias de arquivo, `missing` nos minutos entre os dois negócios de um salto de id, inclusive na virada do dia, e `ok` nos demais. Todo minuto do período tem uma linha. | Must | doc 04 §3.4, RN-008 | T |
+| RF-177 | O agregado ao vivo deve guardar o último horário de recebimento do minuto, para que o uso em uma decisão respeite a disponibilidade *point-in-time* (doc 04 §3.5). | Must | PP-04, RN-006 | T |
+| RF-178 | O mesmo código deve agregar dias de arquivo, horas ao vivo e, na V0.3, os minutos da operação; ele recebe registros normalizados e não sabe de onde vieram. | Must | PP-05 | T, I |
+| RF-179 | A agregação de negócios do período de holdout da trilha A só pode rodar com uma opção explícita, registrada no manifesto da execução, reservada à avaliação final (doc 04 §3.3; DEC-31). | Must | IS-12 | T |
 
 ### 4.9 Operação e configuração
 
@@ -295,6 +301,7 @@ Entidades e atributos mínimos. Tipos físicos, formatos de arquivo e particiona
 | RF-183 | O comando de status deve mostrar, por stream: estado da conexão, idade da última mensagem e lacunas das últimas 24 h; e, no geral: uso de disco e horário da última replicação. | Must | F-10, US-06 | D |
 | RF-184 | A configuração deve vir de arquivo e de variáveis de ambiente, ser validada na inicialização e impedir o início, com mensagem clara, se for inválida. | Must | RNF-016 | T |
 | RF-185 | Cada sessão deve registrar a versão do código e a configuração efetiva (sem segredos). | Must | IS-09 | I |
+| RF-187 | O processamento pesado sob demanda (doc 03 §7.8) deve: encerrar e apagar a instância ao terminar ou ao atingir um limite de horas; gravar um manifesto com versão do código, argumentos, arquivos de entrada e de saída com SHA-256, linhas e duração; e poder ser repetido sem duplicar saídas. | Must | RNF-023, CA-07 | T, D |
 | RF-186 | A troca de versão do coletor só pode parar a instância antiga depois que a nova, **iniciada nesta troca**, estiver recebendo todos os canais; dados de execuções anteriores não contam como prontidão. As duas devem se sobrepor por um tempo mínimo [PROPOSTA: 5 s]. | Must | F-06, IS-01 | T, D |
 
 ### 4.10 Livro de ofertas: diferencial e reconstrução (F-03, F-04)
@@ -337,6 +344,7 @@ Entidades e atributos mínimos. Tipos físicos, formatos de arquivo e particiona
 | RNF-023 | Custo | Todo recurso de nuvem deve ter a tag do projeto; a estimativa de custo mensal deve estar documentada e aprovada antes do provisionamento. | RN-012, RS-09 | I |
 | RNF-024 | Custo | Um alerta de orçamento deve estar ativo antes do início da coleta contínua. | R-17 | I |
 | RNF-025 | Custo | Métricas personalizadas, alarmes e volume de logs devem ser dimensionados para a camada gratuita sempre que possível; cada métrica e alarme acima dela precisa de justificativa de custo. | RS-09 | I, A |
+| RNF-027 | Desempenho | A agregação deve processar um dia de negócios com memória limitada (em blocos), sem carregar o dia inteiro: até 2 GiB por processo no pior dia medido (15,4 milhões de negócios, MD-27). | PD-23 | T, A |
 | RNF-026 | Conformidade | O sistema deve respeitar os limites e os termos de uso da Binance. | RS-03, RN-015 | I |
 
 ---
@@ -513,8 +521,8 @@ Requisitos da V0.1 que já servem às versões seguintes: replay (RF-134) para a
 | F-08 Persistência | RF-131–RF-139; RNF-004, RNF-010, RNF-011 | UC-09, UC-10 | CA-03, CA-06 |
 | F-09 Qualidade | RF-151–RF-160, RF-194 | UC-06 | CA-05 |
 | F-10 Monitoramento | RF-161–RF-166; RNF-018 | UC-07, UC-08 | CA-01 |
-| F-11 Agregações | RF-171–RF-173 | — | IS-03 |
-| Transversal: operação | RF-181–RF-186 | UC-01, UC-07 | — |
+| F-11 Agregações | RF-171–RF-179, RNF-027 | — | IS-03 |
+| Transversal: operação | RF-181–RF-187 | UC-01, UC-07 | — |
 | Transversal: segurança e custo | RN-001, RN-012, RN-015; RNF-013–RNF-017, RNF-023–RNF-025 | — | — |
 
 ---
@@ -559,3 +567,4 @@ Nenhuma pendência aberta que afete a V0.1. Resolvidas em 23/10/2026: PD-06 → 
 | 0.5 | 23/10/2026 | Ambiente operacional na us-east-2 (DEC-26). Na produção, RF-146 recorre ao arquivo diário, porque `historicalTrades` responde 451 de lá (doc 06 MD-18). |
 | 0.6 | 25/10/2026 | UC-02, fluxo 1a: com o socket ativo, o silêncio de parte dos streams abre a nova sessão antes de encerrar a antiga. |
 | 0.7 | 31/10/2026 | Aprovado em 31/10/2026. Depois de buracos não registrados nas trocas de versão (doc 06 MD-28): RF-160 (continuidade conferida pelo pipeline, entre sessões), RF-186 (prontidão real na troca), RF-158 falha sem o registro de lacunas e sessões; CA-01 inclui a conferência. |
+| 0.8 | 06/11/2026 | Aprovado em 06/11/2026 (DEC-32). Etapa 1 da V0.2: RF-172 e RF-173 passam a Must; RF-174 a RF-179 (agregados por minuto), RF-187 (processamento sob demanda) e RNF-027. |

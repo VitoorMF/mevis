@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.15 — rascunho |
+| Versão | 0.16 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -49,6 +49,7 @@ Preços foram consultados na AWS Price List API em 23/10/2026 (região us-east-2
 | ADR-11 | (Preliminar) O Trading Engine da V0.3 terá conexão de mercado própria, sem depender do coletor. | §13 |
 | ADR-12 | Alertas por e-mail via SNS (resolve PD-13). | §7.5 |
 | ADR-13 | Página pública de status só operacional: bucket separado, lido só pelo CloudFront (OAC), com um JSON gravado pelo servidor a cada 40 s; nenhum dado de mercado (aprovada em 25/10/2026; intervalo de 15 s para 40 s em 26/10/2026). | §7.7 |
+| ADR-14 | Processamento pesado e raro numa instância temporária, lançada de um modelo do Terraform, que se encerra e se apaga sozinha; nada fica ligado entre execuções (aprovada em 06/11/2026, DEC-32). | §7.8 |
 
 ---
 
@@ -154,10 +155,11 @@ trader/
   ingest/      sessão e rotação, gravador bruto, verificações ao vivo, snapshots, offset
   storage/     layout de caminhos, escrita de Parquet, sincronização S3, retenção
   recovery/    estratégias de recuperação por canal
+  aggregate/   agregados por minuto de negócios e do livro (doc 06 §5.6)    (sem E/S; mesmo código em lote e ao vivo)
   pipeline/    rodada horária: órfãos, compressão, normalização por hora, máscara, exportações,
                réplica e retenção; backfill dos arquivos públicos (doc 06 §7);
                relatório de qualidade (doc 06 §8.3); dados do painel da coleta (doc 06 §8.4);
-               publicador da página pública de status (§7.7)
+               publicador da página pública de status (§7.7); agregados por minuto (§7.8)
   public/      página pública de status (HTML estático, sem bibliotecas externas; §7.7)
   ops/         configuração, logs estruturados, StatsD, saúde, estado SQLite
   cli/         comandos
@@ -172,7 +174,7 @@ trader/
 | `pyarrow` | Parquet com `DECIMAL` | Só no pipeline e na pesquisa. |
 | `boto3` | S3 | Só no pipeline e na CLI. No MacBook, `botocore[crt]` (só desenvolvimento) permite usar as credenciais de `aws login`. |
 | `sqlite3` (biblioteca padrão) | Estado operacional | Sem servidor. |
-| DuckDB, Polars | Leitura na pesquisa (MacBook) | DEC-20. |
+| DuckDB, Polars | Leitura na pesquisa (MacBook) | DEC-20. Os agregados por minuto usam só `pyarrow`, para caber no pacote do host (PD-24, DEC-31). |
 | `pytest`, `ruff`, `mypy` | Testes e qualidade | RNF-020. |
 
 ---
@@ -325,6 +327,45 @@ trader-status (serviço no host: `trader status-publisher`, a cada 40 s)
 - **Sem identificadores** na página: nada de ID da conta, nome de bucket, ID da instância ou IP.
 - **Custo** (§10.1): ~65 mil gravações por mês no S3 (≈ US$ 0,33); CloudFront dentro da franquia gratuita (1 TB e 10 milhões de requisições por mês) [A VERIFICAR no plano gratuito]; armazenamento de poucos KB.
 
+### 7.8 Instância de processamento sob demanda (ADR-14)
+
+Para trabalhos pesados e raros que não cabem no host de coleta nem no MacBook (PD-23; doc 04 §12). O primeiro é o cálculo dos agregados por minuto do histórico de negócios (doc 06 §5.6).
+
+```text
+MacBook: scripts/run-job.sh aggregates --start AAAA-MM-DD --end AAAA-MM-DD [--version <versão>]
+  └─► aws ec2 run-instances --launch-template trader-job  (user_data com versão e argumentos)
+        instância temporária, na sub-rede e no security group do projeto
+          1. shutdown -h +180          trava: encerra em 3 h, aconteça o que acontecer
+          2. instala o artefato da versão, como o trader-deploy (§9.1)
+          3. trader aggregates ...     lê normalized/ do S3 e grava derived/ no S3 (endpoint de gateway)
+          4. grava o manifesto da execução em derived/ops/jobs/ e envia o log ao CloudWatch
+          5. shutdown -h now  ─► encerrada e apagada (comportamento `terminate`)
+  └─► o script acompanha até o fim e mostra o manifesto
+```
+
+| Item | Configuração | Motivo |
+|---|---|---|
+| Modelo de lançamento | `trader-job`, no Terraform (módulo `job_runner`) | Parado, não custa nada; a configuração fica revisada no Git. |
+| Tipo | c7g.2xlarge (8 vCPU Graviton, 16 GiB), sob demanda | PD-23. Mesma arquitetura do host; um dia de negócios por núcleo. |
+| Sistema | Amazon Linux 2023 ARM64, AMI resolvida pelo parâmetro público do SSM no lançamento | Igual ao host. |
+| Disco | gp3, 20 GB, criptografado, apagado com a instância | Só o ambiente Python e arquivos temporários; os dados vêm do S3 e voltam para ele. |
+| Rede | Sub-rede pública e security group do host: sem entrada, saída TCP 443 | ADR-06. A internet só serve para baixar o Python e as dependências, como no host; os dados passam pelo endpoint de gateway do S3. |
+| Metadados | IMDSv2 obrigatório, limite de saltos 1 | RNF-014. |
+| Encerramento | `instance_initiated_shutdown_behavior = terminate`, com a trava de 3 h | Nada fica ligado por esquecimento. |
+| Papel `trader-job` | `s3:GetObject` em `artifacts/`, `normalized/` e `derived/quality_mask/`; `s3:PutObject` em `derived/minute_trades/`, `derived/minute_book/` e `derived/ops/jobs/`; `s3:ListBucket`; logs em `/trader/jobs`; política gerenciada do SSM, só para investigar uma execução em andamento. **Sem `s3:DeleteObject`** | ADR-08, RNF-014. |
+| Logs | Grupo `/trader/jobs`, retenção de 14 dias | Camada gratuita. |
+| Spot | Não | Com ~US$ 0,60 por execução, a economia não compensa o risco de interrupção. |
+
+- **Quem lança:** o operador, do MacBook, com o perfil `trader` e a confirmação do custo estimado. Nada é agendado.
+- **Plano B (PD-23):** o mesmo comando roda no MacBook (`trader aggregates`), lendo do S3 dia a dia (~6 h; ~12 GB de saída do S3).
+- **Custo:** US$ 0,289/h (c7g.2xlarge) + US$ 0,005/h (IPv4) por ~2 h, mais o disco por algumas horas: **~US$ 0,60 por execução**, dos créditos (estimativa aprovada em 26/10/2026). Com a PD-26 (b), DEC-31,, a primeira execução cobre 9 meses (~US$ 0,45) e a do holdout fica para a avaliação final (~US$ 0,15).
+- **Verificado em 06/11/2026**, sem criar nada:
+  1. `aws ec2 run-instances --dry-run` com c7g.2xlarge, a AMI ARM64, a sub-rede e o security group do projeto responde `DryRunOperation` ("teria funcionado"): nem a SCP da organização nem o plano gratuito bloqueiam o tipo. A documentação do plano gratuito só exclui serviços como Savings Plans e instâncias reservadas. O c7g não é elegível à camada gratuita: o uso sai dos créditos, como previsto.
+  2. Cota de vCPUs sob demanda (`L-1216C47A`): 16. O host usa 2; a instância, 8.
+  3. A zona da sub-rede (`us-east-2a`) oferece c7g.2xlarge.
+
+  O teste de verdade é a primeira execução: se ela for recusada, nada é criado nem cobrado, e as alternativas são o m7i-flex.large (2 vCPU x86, 8 GiB; elegível à camada gratuita, ~4× mais lento) ou o plano B.
+
 ### 7.6 Terraform (DEC-22, ADR-10)
 
 ```text
@@ -357,6 +398,7 @@ infra/
 | Segredos | Nenhum segredo na V0.1. A assinatura de e-mail do SNS não é segredo. | RNF-016 |
 | Imutabilidade | Instância sem permissão de apagar; versionamento do bucket protege contra sobrescrita. | RN-007 |
 | Conta certa | ADR-09. | R-20 |
+| Instância de processamento | Papel próprio (`trader-job`), sem exclusão, gravando só nos prefixos dos agregados; encerramento automático (§7.8). | RNF-014, RN-007 |
 
 ---
 
@@ -408,6 +450,7 @@ O passo a passo com comandos está em `infra/README.md`.
 | Item | US$/mês |
 |---|---|
 | t4g.small / t4g.micro / t4g.nano | 12,26 / 6,13 / 3,07 |
+| c7g.2xlarge, sob demanda (§7.8) | US$ 0,289 por hora de uso; ~US$ 0,60 por execução |
 | gp3, 16 GB | 1,28 |
 | IPv4 público | 3,65 (ou 0 se houver franquia de 750 h) |
 | S3 Standard (US$ 0,023/GB-mês) | ~0,17 no 1º mês → ~1,96 no 12º (doc 06 §6.3) |
@@ -487,7 +530,7 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 
 | Versão | Onde roda | Notas |
 |---|---|---|
-| V0.2 (pesquisa) | MacBook | DuckDB e Polars sobre o cache local de Parquet; treino de XGBoost local. Nenhum custo de nuvem adicional previsto. |
+| V0.2 (pesquisa) | MacBook; agregados por minuto na instância sob demanda (§7.8) e, para as horas novas, no pipeline do host (PD-24, DEC-31) | DuckDB e Polars sobre o cache local de Parquet; treino de XGBoost local. Custo de nuvem: ~US$ 0,60 por execução dos agregados. |
 | V0.3 (paper trading) | Mesmo host de coleta | **ADR-11 (preliminar):** o Trading Engine abre a própria conexão de mercado, usando os mesmos módulos `sources` e `normalize` (PP-05), sem acoplar o seu ciclo de vida ao do coletor. A memória adicional (modelo e estado) será dimensionada no doc 03 v0.2, junto com o doc 05; pode exigir manter o t4g.small. |
 
 ---
@@ -541,3 +584,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.13 | 25/10/2026 | ADR-13 e §7.7: página pública de status só operacional, servida pelo CloudFront; §5 inclui `public/` e o publicador; §7.6 inclui o módulo `public_status`. |
 | 0.14 | 26/10/2026 | ADR-13 e §7.7: a página pública passa a ser atualizada a cada 40 s (antes 15 s); custo das gravações ≈ US$ 0,33/mês. |
 | 0.15 | 31/10/2026 | Aprovado em 31/10/2026. §9.2: defeito da troca do coletor (saúde antiga contada como prontidão) e correção; §6.3: conferência de continuidade no pipeline. |
+| 0.16 | 06/11/2026 | Aprovado em 06/11/2026 (DEC-32). ADR-14 e §7.8: instância de processamento sob demanda para os agregados por minuto (PD-23), com plano, cota e zona verificados; §5: pacote `aggregate`; §8, §10 e §13 ajustados. |
