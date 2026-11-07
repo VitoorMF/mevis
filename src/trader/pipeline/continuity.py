@@ -2,7 +2,8 @@
 
 O coletor confere cada sequência dentro da própria execução. Aqui, a conferência junta todas as
 sessões de uma hora na camada bruta e compara com o fim da hora anterior: é o que acha um buraco
-que nenhuma instância viu, como o de uma troca de versão (doc 06 §9.2).
+que nenhuma instância viu, como o de uma troca de versão (doc 06 §9.2). Sem hora anterior, é o
+início da coleta: o trecho do primeiro minuto antes do primeiro registro vira lacuna (doc 06 §8.1).
 """
 
 import json
@@ -11,8 +12,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from trader.core.timeunits import MINUTE_US
 from trader.ops.state import ContinuityMark, GapRecord, StoredGap
 from trader.storage.rawfiles import BadLine, iter_records
+
+COLLECTION_START = "collection_start"
 
 
 @dataclass
@@ -35,6 +39,25 @@ def _payload(line: bytes) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def _collection_start(channel: str, first_ts_us: int, now_us: int) -> list[GapRecord]:
+    """Canal sem registro em hora anterior: a coleta começou no meio do minuto do primeiro
+    registro, que fica `missing` (doc 06 §8.1). Sem recuperação: o primeiro id que falta é
+    desconhecido. Começar no início exato do minuto não deixa lacuna."""
+    minute_start = first_ts_us - first_ts_us % MINUTE_US
+    if minute_start == first_ts_us:
+        return []
+    return [
+        GapRecord(
+            channel=channel,
+            start_ts_us=minute_start,
+            end_ts_us=first_ts_us,
+            cause=COLLECTION_START,
+            detected_ts_us=now_us,
+            recoverable=False,
+        )
+    ]
+
+
 def _id_holes(
     channel: str,
     cause: str,
@@ -43,9 +66,12 @@ def _id_holes(
     previous: ContinuityMark | None,
     now_us: int,
 ) -> tuple[list[GapRecord], ContinuityMark | None]:
+    spans = sorted(seen.spans.items())
     holes = []
+    if previous is None and spans:
+        holes += _collection_start(channel, spans[0][1][1], now_us)
     mark = previous
-    for first, (last, ts_us) in sorted(seen.spans.items()):
+    for first, (last, ts_us) in spans:
         if mark is not None and mark.last_id is not None and first > mark.last_id + 1:
             holes.append(
                 GapRecord(
@@ -105,7 +131,10 @@ def check_hour(
             marks[channel] = mark
 
     last = previous[top20_stream].last_ts_us if top20_stream in previous else None
-    for recv_us in sorted(top20):
+    snapshots = sorted(top20)
+    if last is None and snapshots:
+        gaps += _collection_start(top20_stream, snapshots[0], now_us)
+    for recv_us in snapshots:
         if last is not None and recv_us - last > top20_limit_us:
             gaps.append(
                 GapRecord(

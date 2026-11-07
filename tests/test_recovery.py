@@ -14,7 +14,7 @@ from test_pipeline import TRADE, RawBuilder, closed_kline, trade
 
 from trader.core.timeunits import MINUTE_US, SECOND_US
 from trader.ops.config import PipelineConfig
-from trader.ops.state import GapRecord, StateStore
+from trader.ops.state import ContinuityMark, GapRecord, StateStore
 from trader.pipeline.hourly import HourlyPipeline, PipelineReport
 from trader.recovery.gaps import GapRecovery, _write_raw
 from trader.sources.binance_archive import ArchiveClient
@@ -91,6 +91,8 @@ def build(data_dir: Path) -> None:
     raw.add("S1", KLINE, START + 3 * MINUTE_US + 500_000, closed_kline(START + 2 * MINUTE_US))
     raw.writer.close()
     with StateStore(data_dir / "state.db") as state:
+        # Coleta em andamento antes da hora (até o negócio 0): sem lacuna de início (doc 06 §8.1).
+        state.set_continuity("BTCUSDT", HOUR - 1, "anterior", {TRADE: ContinuityMark(0, START)})
         state.session_opened("S1", "wss://x", [TRADE], START - HOUR_US, "test")
         state.session_closed("S1", START + 2 * HOUR_US, "shutdown", 0)
         for minute in range(-60, 121, 5):

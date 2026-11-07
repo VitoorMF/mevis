@@ -4,13 +4,29 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from test_pipeline import DIFF, END, HOUR, START, TOP20, TRADE, RawBuilder, diff, run, trade
+from test_pipeline import (
+    DIFF,
+    END,
+    HOUR,
+    KLINE,
+    START,
+    TOP20,
+    TRADE,
+    RawBuilder,
+    book,
+    closed_kline,
+    diff,
+    rows,
+    run,
+    trade,
+)
 
 from trader.cli.main import main
-from trader.core.timeunits import SECOND_US
+from trader.core.timeunits import MINUTE_US, SECOND_US
 from trader.ops.config import PipelineConfig
 from trader.ops.health import is_ready
 from trader.ops.state import GapRecord, StateStore
+from trader.pipeline.continuity import COLLECTION_START
 from trader.pipeline.hourly import HourlyPipeline
 from trader.storage.layout import HOUR_US, StorageError, dataset_path
 from trader.storage.objectstore import LocalDirectoryStore
@@ -20,9 +36,10 @@ NOW = END + 2 * HOUR_US
 
 
 def swap(data_dir: Path) -> None:
-    """Instância antiga para em t=10 s, e a nova só começa em t=13 s, sem lacuna registrada."""
+    """Instância antiga para em t=10 s, e a nova só começa em t=13 s, sem lacuna registrada.
+    A coleta começa em t=0, no início exato do minuto: sem lacuna de início (doc 06 §8.1)."""
     raw = RawBuilder(data_dir)
-    for t in range(1, 11):
+    for t in range(0, 11):
         raw.add("OLD", TRADE, START + t * S, trade(t, START + t * S))
         raw.add("OLD", TOP20, START + t * S, b'{"stream":"x","data":{}}')
         raw.add("OLD", DIFF, START + t * S, diff(10 * t, 10 * t + 9, START + t * S))
@@ -65,7 +82,7 @@ def test_hole_between_sessions_becomes_gap_and_is_not_duplicated(tmp_path: Path)
 def test_overlapping_sessions_leave_no_gap(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     raw = RawBuilder(data_dir)
-    for t in range(1, 11):
+    for t in range(0, 11):
         raw.add("OLD", TRADE, START + t * S, trade(t, START + t * S))
     for t in range(8, 21):
         raw.add("NEW", TRADE, START + t * S + 1, trade(t, START + t * S))
@@ -76,7 +93,7 @@ def test_overlapping_sessions_leave_no_gap(tmp_path: Path) -> None:
 def test_hole_at_the_hour_boundary_and_known_gap(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     raw = RawBuilder(data_dir)
-    raw.add("A", TRADE, END - S, trade(1, END - S))
+    raw.add("A", TRADE, END - MINUTE_US, trade(1, END - MINUTE_US))
     raw.add("B", TRADE, END + S, trade(5, END + S))
     raw.add("B", TRADE, END + 2 * S, trade(6, END + 2 * S))
     raw.add("B", TRADE, END + 3 * S, trade(9, END + 3 * S))
@@ -92,11 +109,64 @@ def test_hole_at_the_hour_boundary_and_known_gap(tmp_path: Path) -> None:
     assert ids == [(2, 4), (7, 8)]
 
 
+def fresh_collection(data_dir: Path, first_s: int) -> None:
+    """Coleta nova, sem hora anterior, que começa `first_s` segundos depois de START e vai até
+    o minuto 1: negócios, livro e diferencial a cada segundo, e o candle fechado do minuto 0."""
+    raw = RawBuilder(data_dir)
+    for t in range(first_s, 71):
+        raw.add("S1", TRADE, START + t * S + 1000, trade(t, START + t * S))
+        raw.add("S1", TOP20, START + t * S, book(t))
+        raw.add("S1", DIFF, START + t * S, diff(10 * t, 10 * t + 9, START + t * S))
+    raw.add("S1", KLINE, START + 60 * S + 500_000, closed_kline(START))
+    raw.writer.close()
+    with StateStore(data_dir / "state.db") as state:
+        state.session_opened("S1", "wss://x", [TRADE], START + first_s * S, "t")
+        state.session_closed("S1", END, "shutdown", 0)
+        for minute in range(-5, 66, 5):
+            local = START + minute * 60 * S
+            state.record_clock_offset(local, local + 100_000, 50_000, 100_000)
+
+
+def test_collection_starting_mid_minute_marks_the_first_minute_missing(tmp_path: Path) -> None:
+    """Doc 06 §8.1 e §8.2: sem hora anterior, o trecho do minuto antes do primeiro registro é
+    lacuna irrecuperável, e o minuto fica `missing` nos canais contínuos, mas não no candle."""
+    data_dir = tmp_path / "data"
+    fresh_collection(data_dir, first_s=11)
+    config = PipelineConfig(data_dir=data_dir)
+
+    assert run(config, tmp_path / "replica", NOW).continuity_gaps == 3
+    found = gaps(data_dir)
+    assert set(found) == {TRADE, TOP20, DIFF}
+    for gap in found.values():
+        assert (gap.start_ts_us, gap.end_ts_us) == (START, START + 11 * S)
+        assert gap.cause == COLLECTION_START and not gap.recoverable
+        assert (gap.first_missing_id, gap.last_missing_id) == (None, None)
+
+    mask = {
+        (r["channel"], (r["minute_ts_us"] - START) // (60 * S)): r["status"]
+        for r in rows(dataset_path(data_dir, "derived", "quality_mask", "BTCUSDT", HOUR))
+    }
+    for channel in (TRADE, TOP20, DIFF):
+        assert (mask[(channel, 0)], mask[(channel, 1)]) == ("missing", "ok")
+    assert mask[(KLINE, 0)] == "ok"  # o candle fechado chega completo
+    minutes = rows(dataset_path(data_dir, "derived", "minute_trades", "BTCUSDT", HOUR))
+    assert (minutes[0]["trade_count"], minutes[0]["status"]) == (49, "missing")
+    assert minutes[1]["status"] == "ok"
+
+    assert run(config, tmp_path / "replica", NOW).continuity_gaps == 0  # não duplica
+
+
+def test_collection_starting_on_the_minute_leaves_no_gap(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    fresh_collection(data_dir, first_s=0)
+    assert run(PipelineConfig(data_dir=data_dir), tmp_path / "replica", NOW).continuity_gaps == 0
+
+
 def test_reconcile_restores_files_registers_gaps_and_applies_retention(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     replica = tmp_path / "replica"
     raw = RawBuilder(data_dir)
-    for t in (1, 2, 5):
+    for t in (0, 1, 2, 5):
         raw.add("A", TRADE, START + t * S, trade(t, START + t * S))
     raw.writer.close()
     with StateStore(data_dir / "state.db") as state:

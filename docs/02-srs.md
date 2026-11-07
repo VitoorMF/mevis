@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 02 — SRS |
-| Versão | 0.8 — rascunho |
+| Versão | 0.9 — rascunho |
 | Escopo desta versão | **V0.1 (Data Engine) detalhada**, mais os agregados por minuto da etapa 1 da V0.2 (§4.8). O resto da V0.2 e a V0.3 apenas delimitados (§9). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -265,7 +265,7 @@ Entidades e atributos mínimos. Tipos físicos, formatos de arquivo e particiona
 | RF-157 | O sistema deve manter um registro de lacunas (entidade Lacuna), atualizado na detecção e na recuperação. | Must | F-06, F-09 | T |
 | RF-158 | O sistema deve gerar, sob demanda e para qualquer período, um relatório de qualidade com: completude por stream; lacunas por status; duplicatas; anomalias; distribuição do atraso entre horário do evento e de recebimento; offset de relógio; reconexões. Sem o registro de lacunas e sessões do período, o relatório deve falhar com mensagem clara, nunca informar "nenhuma". | Must | F-09, CA-05 | T, D |
 | RF-159 | O sistema deve produzir a **máscara de qualidade** por stream e por minuto, legível pela pesquisa (V0.2) e pelo Risk Manager (V0.3). | Must | F-09, PP-03, RN-005 | T |
-| RF-160 | O pipeline deve conferir, independentemente do coletor e **entre sessões e instâncias**, a continuidade dos ids de negócios e do diferencial do livro e o intervalo entre snapshots top 20, inclusive na virada de hora. Todo buraco sem lacuna correspondente deve ser registrado (RF-157) e seguir a recuperação do canal (RF-146, RF-148). | Must | F-09, IS-01 | T |
+| RF-160 | O pipeline deve conferir, independentemente do coletor e **entre sessões e instâncias**, a continuidade dos ids de negócios e do diferencial do livro e o intervalo entre snapshots top 20, inclusive na virada de hora e no início de uma coleta sem sessão anterior (doc 06 §8.1). Todo buraco sem lacuna correspondente deve ser registrado (RF-157) e seguir a recuperação do canal (RF-146, RF-148). | Must | F-09, IS-01 | T |
 
 ### 4.7 Monitoramento e alertas (F-10)
 
@@ -568,3 +568,4 @@ Nenhuma pendência aberta que afete a V0.1. Resolvidas em 23/10/2026: PD-06 → 
 | 0.6 | 25/10/2026 | UC-02, fluxo 1a: com o socket ativo, o silêncio de parte dos streams abre a nova sessão antes de encerrar a antiga. |
 | 0.7 | 31/10/2026 | Aprovado em 31/10/2026. Depois de buracos não registrados nas trocas de versão (doc 06 MD-28): RF-160 (continuidade conferida pelo pipeline, entre sessões), RF-186 (prontidão real na troca), RF-158 falha sem o registro de lacunas e sessões; CA-01 inclui a conferência. |
 | 0.8 | 06/11/2026 | Aprovado em 06/11/2026 (DEC-32). Etapa 1 da V0.2: RF-172 e RF-173 passam a Must; RF-174 a RF-179 (agregados por minuto), RF-187 (processamento sob demanda) e RNF-027. |
+| 0.9 | 07/11/2026 | Aprovado em 07/11/2026. RF-160: o início de uma coleta sem sessão anterior também é conferido (doc 06 §8.1). |

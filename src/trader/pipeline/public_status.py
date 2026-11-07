@@ -57,6 +57,7 @@ CAUSES = {
     "kline_missing": "candle não recebido",
     "book_stale": "livro sem atualização",
     "diff_break": "quebra na sequência do livro",
+    "collection_start": "início da coleta no meio do minuto",
 }
 BACKFILL_PREFIX = "derived/ops/backfill_files"
 

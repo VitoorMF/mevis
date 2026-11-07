@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.19 — rascunho |
+| Versão | 0.20 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -485,6 +485,7 @@ Regras: checksum verificado antes da importação (RF-143); unidade de tempo con
 | Regressão de `last_update_id` | Top 20 | Aceitar e marcar `invalid`. |
 | Intervalo entre snapshots > 2 s, ao vivo ou na conferência entre sessões (RF-160) | Top 20 | Registrar lacuna (irrecuperável). |
 | `U ≠ u anterior + 1`, ao vivo ou na conferência entre sessões (RF-160) | Diferencial | Registrar lacuna do diferencial; ao vivo, solicitar novo snapshot REST imediato. |
+| Início de coleta: canal sem registro em nenhuma hora anterior, na conferência entre sessões (RF-160) | Negócios, top 20, diferencial | Registrar lacuna irrecuperável (`collection_start`) do início do minuto até o primeiro registro; o minuto fica `missing` (§8.2). Os negócios que faltam não são recuperados: o id do primeiro deles é desconhecido. |
 | Offset de relógio > 250 ms | Sessão | Alerta e marca `low_clock_confidence` nos minutos afetados. |
 
 ### 8.2 Máscara de qualidade
@@ -501,6 +502,10 @@ Um registro por canal e por minuto UTC. Estados, do pior para o melhor:
 | `ok` | Dados ao vivo, completos e válidos. |
 
 Se mais de um estado se aplica ao minuto, prevalece o pior. A pesquisa (V0.2) e o Risk Manager (V0.3) consultam a máscara para excluir janelas contaminadas (RN-005).
+
+**Início e fim de uma coleta (decisão de 07/11/2026):** o minuto em que uma coleta começa sem sessão anterior é parcial nos canais contínuos (negócios, top 20 e diferencial) e fica `missing` pela regra de início de coleta (§8.1). O candle de 1 min não precisa da regra, porque chega fechado e completo. No fim de uma sessão, a seguinte registra a lacuna desde o último registro, e os minutos parciais das duas pontas deixam de ser `ok`; só uma parada definitiva deixaria o último minuto parcial sem marca.
+
+**Exceção conhecida:** a regra vale para as coletas iniciadas depois da implementação. O minuto 23/10/2026 22:44 UTC, início da coleta contínua (coletor às 22:44:11), continua `ok` nos três canais contínuos, tanto na máscara quanto nos agregados por minuto (§5.6), embora seja parcial: 170 de 301 negócios, conferido contra o candle ao vivo em 07/11/2026. O minuto não é regerado: a hora já foi conferida e o bruto saiu do disco do host pela retenção local; refazê-la exigiria trazer o bruto de volta da réplica (`trader reconcile`, §9.2) e forçar uma nova conferência dessa hora, para um único minuto. Quem montar datasets (etapa 3 da V0.2) descarta esse minuto.
 
 ### 8.3 Relatório de qualidade (RF-158, CA-05)
 
@@ -659,7 +664,8 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | Investigar a frequência do parcial top 20 (8,7/s × 10/s nominais; ~10/s na coleta local de 23/10/2026) | V0.1 |
 | Tamanho real da camada normalizada | V0.1 |
 | Máscara de qualidade para os dias importados pelo backfill (§7) | V0.2, se a pesquisa precisar |
-| **[PENDENTE]** Defeito da máscara no início da coleta: o minuto em que o coletor começa sem sessão anterior (23/10/2026 22:44 UTC; coletor às 22:44:11) sai `ok`, embora parcial (170 de 301 negócios, conferido contra o candle ao vivo em 07/11/2026). Afeta só esse minuto: as trocas de versão têm sobreposição e as lacunas entre sessões são detectadas pelos ids. Decidir entre corrigir a regra (§8.2) e regenerar a hora, ou registrar como ressalva | Operador; antes da etapa 3 da V0.2 (datasets) |
+| Publicar no host a versão com a regra de início de coleta (§8.1, §8.2), implementada em 07/11/2026 | Próxima implantação |
+| Descartar o minuto 23/10/2026 22:44 UTC dos canais contínuos (exceção de §8.2) | Etapa 3 da V0.2 (datasets) |
 | Peso exato de `exchangeInfo` | Implementação |
 | Termos de uso (§12) | Antes da coleta contínua |
 | Classes de armazenamento mais baratas no S3 | CP-3 (doc 03 §10.4) |
@@ -706,3 +712,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.17 | 06/11/2026 | Aprovado em 06/11/2026 (DEC-32). §5.6: agregados por minuto de negócios e do livro (esquemas, faixas de tamanho, status e disponibilidade); §6.3: volume. |
 | 0.18 | 06/11/2026 | §5.6: implementação, detalhes de interpretação e MD-29 (validação contra os candles e medição do pior dia). |
 | 0.19 | 07/11/2026 | §13: defeito da máscara no primeiro minuto da coleta, achado ao conferir os agregados das horas ao vivo. |
+| 0.20 | 07/11/2026 | Aprovado em 07/11/2026. §8.1 e §8.2: regra de início de coleta (o primeiro minuto dos canais contínuos fica `missing`), decidida em 07/11/2026; 23/10/2026 22:44 UTC fica como exceção conhecida, descartada nos datasets. |

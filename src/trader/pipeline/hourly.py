@@ -36,7 +36,7 @@ from trader.ops.config import PipelineConfig
 from trader.ops.logs import ctx
 from trader.ops.state import RawFileRow, StateStore
 from trader.pipeline.aggregates import aggregate_live_hour
-from trader.pipeline.continuity import already_registered, check_hour
+from trader.pipeline.continuity import COLLECTION_START, already_registered, check_hour
 from trader.pipeline.normalize_hour import normalize_hour
 from trader.quality.mask import ClockReference, GapSpan, build_mask
 from trader.recovery.gaps import GapRecovery
@@ -190,7 +190,9 @@ class HourlyPipeline:
                 self._state.record_gap(gap)
                 report.continuity_gaps += 1
                 log.warning(
-                    "buraco entre sessões",
+                    "início da coleta no meio do minuto"
+                    if gap.cause == COLLECTION_START
+                    else "buraco entre sessões",
                     extra=ctx(
                         channel=gap.channel,
                         cause=gap.cause,

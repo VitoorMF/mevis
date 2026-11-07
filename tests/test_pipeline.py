@@ -106,10 +106,12 @@ def build_scenario(data_dir: Path) -> None:
     # Sessão S1, hora H: negócios 1..10, livro, diferencial e o candle do minuto 0.
     for i in range(1, 11):
         raw.add("S1", TRADE, START + i * s + 1000, trade(i, START + i * s))
-    raw.add("S1", TOP20, START + 1 * s, book(100))
+    # Livro e diferencial começam no início exato do minuto 0, e os negócios no órfão de S3, no
+    # início do último minuto de H-1: o cenário não tem lacuna de início de coleta (doc 06 §8.1).
+    raw.add("S1", TOP20, START, book(100))
     raw.add("S1", TOP20, START + 2 * s, book(101, bid="81524.05000000"))  # cruzado: fica, inválido
     raw.add("S1", TOP20, START + 3 * s, book(102, unsorted=True))  # desordenado: quarentena
-    raw.add("S1", DIFF, START + 1 * s, diff(1, 5, START + 1 * s))
+    raw.add("S1", DIFF, START, diff(1, 5, START))
     raw.add("S1", KLINE, START + 60 * s + 500_000, closed_kline(START))
     raw.add("S1", TRADE, START + 20 * s, b'{"stream":"btcusdt@trade","data":{"e":"trade"}}')
     # Negócio da hora anterior recebido já na hora H, e o candle do último minuto de H-1.
@@ -127,7 +129,7 @@ def build_scenario(data_dir: Path) -> None:
     date_dir, hour_dir = hour_dirs(HOUR - 1)
     orphan = raw_root(data_dir, "BTCUSDT") / TRADE / date_dir / hour_dir / "S3.jsonl.open"
     orphan.parent.mkdir(parents=True, exist_ok=True)
-    good = encode(RawRecord(START - 10 * s, "S3", 1, TRADE, trade(-1, START - 10 * s)))
+    good = encode(RawRecord(START - 60 * s, "S3", 1, TRADE, trade(-1, START - 60 * s)))
     orphan.write_bytes(good + b'{"r":1,"s":"S3","q":2,"c":"btcusdt@trade","m":{"str')
 
     with StateStore(data_dir / "state.db") as state:
