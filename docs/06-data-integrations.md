@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.18 — rascunho |
+| Versão | 0.19 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -659,6 +659,7 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | Investigar a frequência do parcial top 20 (8,7/s × 10/s nominais; ~10/s na coleta local de 23/10/2026) | V0.1 |
 | Tamanho real da camada normalizada | V0.1 |
 | Máscara de qualidade para os dias importados pelo backfill (§7) | V0.2, se a pesquisa precisar |
+| **[PENDENTE]** Defeito da máscara no início da coleta: o minuto em que o coletor começa sem sessão anterior (23/10/2026 22:44 UTC; coletor às 22:44:11) sai `ok`, embora parcial (170 de 301 negócios, conferido contra o candle ao vivo em 07/11/2026). Afeta só esse minuto: as trocas de versão têm sobreposição e as lacunas entre sessões são detectadas pelos ids. Decidir entre corrigir a regra (§8.2) e regenerar a hora, ou registrar como ressalva | Operador; antes da etapa 3 da V0.2 (datasets) |
 | Peso exato de `exchangeInfo` | Implementação |
 | Termos de uso (§12) | Antes da coleta contínua |
 | Classes de armazenamento mais baratas no S3 | CP-3 (doc 03 §10.4) |
@@ -704,3 +705,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.16 | 31/10/2026 | §8.6: resultado do G1; §9.2: resultado do reparo. |
 | 0.17 | 06/11/2026 | Aprovado em 06/11/2026 (DEC-32). §5.6: agregados por minuto de negócios e do livro (esquemas, faixas de tamanho, status e disponibilidade); §6.3: volume. |
 | 0.18 | 06/11/2026 | §5.6: implementação, detalhes de interpretação e MD-29 (validação contra os candles e medição do pior dia). |
+| 0.19 | 07/11/2026 | §13: defeito da máscara no primeiro minuto da coleta, achado ao conferir os agregados das horas ao vivo. |

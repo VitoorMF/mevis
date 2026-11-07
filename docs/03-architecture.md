@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.18 — rascunho |
+| Versão | 0.19 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -380,6 +380,12 @@ MacBook: scripts/run-job.sh aggregates --start AAAA-MM-DD --end AAAA-MM-DD [--ve
     - soma dos negócios igual à do manifesto;
     - histograma de tamanhos coerente com a contagem e o volume de cada minuto;
     - nos 393.120 minutos, contagem, volume, volume em USDT, volumes do lado comprador e OHLC iguais aos dos candles de 1 min do arquivo da Binance (os candles do arquivo não trazem os ids de negócio).
+- **Segunda execução em 07/11/2026** (12:50, horário de Brasília; job `aggregates-20261107T155036Z`): as horas ao vivo de 23/10 a 06/11/2026, coletadas antes de o pipeline do host agregar.
+  - **Versão:** o `run-job.sh` usa por padrão a versão do commit atual. O commit `8036cb3` só mudou documentos e Terraform, então foi usada a versão publicada `0.1.0.dev0-752fb02` (`--version`), a mesma do host.
+  - **Tempo e custo:** ~5 min de instância, 197 s de processamento, ~US$ 0,01.
+  - **Volume:** 338 horas, 41.723.267 negócios e 676 arquivos (negócios e livro).
+  - **Memória:** pico de 509 MB por processo.
+  - **Conferido no MacBook:** SHA-256 e soma dos negócios iguais aos do manifesto. Contra os candles de 1 min recebidos ao vivo, 20.236 minutos comparados, inclusive os ids de negócio, e um único minuto diverge: 23/10/2026 22:44 UTC, o primeiro da coleta. O coletor começou às 22:44:11 e a máscara marca o minuto como `ok`, embora faltem os negócios dos primeiros 11 s (170 de 301). É um defeito da máscara da V0.1 (doc 06 §13), não dos agregados.
 
 ### 7.6 Terraform (DEC-22, ADR-10)
 
@@ -602,3 +608,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.16 | 06/11/2026 | Aprovado em 06/11/2026 (DEC-32). ADR-14 e §7.8: instância de processamento sob demanda para os agregados por minuto (PD-23), com plano, cota e zona verificados; §5: pacote `aggregate`; §8, §10 e §13 ajustados. |
 | 0.17 | 06/11/2026 | §6.3: agregados por minuto no pipeline horário; §7.8: implementação e aplicação do módulo `job_runner`, scripts de lançamento e medição no MacBook. |
 | 0.18 | 06/11/2026 | §7.8 e §10.1: a primeira execução foi recusada pelo plano gratuito (c7g.2xlarge não elegível; o `--dry-run` não confere isso); tipo trocado para c7i-flex.large, com AMI x86_64 (DEC-33). Primeira execução: 9 meses em ~8 min, ~US$ 0,01, conferida contra os candles do arquivo. |
+| 0.19 | 07/11/2026 | §7.8: segunda execução (horas ao vivo de 23/10 a 06/11/2026) e conferência contra os candles ao vivo. |

@@ -7,10 +7,10 @@ Fase atual: **V0.1 (Data Engine) em operação, com G1 aprovado (DEC-30)**, cobe
 | 00 | [Contexto inicial](00-contexto-inicial.md) (transferência entre agentes) | Referência histórica, não normativa |
 | 01 | [Product Requirements Document (PRD)](01-prd.md) | Rascunho v0.15 |
 | 02 | [Software Requirements Specification (SRS)](02-srs.md) | Rascunho v0.8 — V0.1 detalhada; etapa 1 da V0.2 aprovada (DEC-32); V0.2 e V0.3 delimitadas |
-| 03 | [System Architecture Document](03-architecture.md) | Rascunho v0.18 — Data Engine e AWS; instância sob demanda (ADR-14, c7i-flex.large por DEC-33), primeira execução em 06/11/2026 (us-east-2); ADRs aprovadas; Terraform em `infra/` |
+| 03 | [System Architecture Document](03-architecture.md) | Rascunho v0.19 — Data Engine e AWS; instância sob demanda (ADR-14, c7i-flex.large por DEC-33), primeira execução em 06/11/2026 (us-east-2); ADRs aprovadas; Terraform em `infra/` |
 | 04 | [AI & Quantitative Research Specification](04-ai-research.md) | **Aprovado v1.3** — método da V0.2 (DEC-27, DEC-28) |
 | 05 | Trading & Risk Engine Specification | Não iniciado |
-| 06 | [Data & Integrations Specification](06-data-integrations.md) | Rascunho v0.18 — dados de mercado; agregados por minuto (§5.6), implementados e validados (MD-29) da V0.1 |
+| 06 | [Data & Integrations Specification](06-data-integrations.md) | Rascunho v0.19 — dados de mercado; agregados por minuto (§5.6), implementados e validados (MD-29) da V0.1 |
 | 07 | Testing & Validation Plan | Não iniciado |
 | 08 | Roadmap & Milestones | Não iniciado |
 
