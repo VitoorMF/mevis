@@ -4,8 +4,8 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 02 — SRS |
-| Versão | 0.10 — rascunho |
-| Escopo desta versão | **V0.1 (Data Engine) detalhada**, mais os agregados por minuto da etapa 1 da V0.2 (§4.8) e as features da etapa 2 (§4.11). O resto da V0.2 e a V0.3 apenas delimitados (§9). |
+| Versão | 0.11 — rascunho |
+| Escopo desta versão | **V0.1 (Data Engine) detalhada**, mais os agregados por minuto da etapa 1 da V0.2 (§4.8), as features da etapa 2 (§4.11) e os datasets da etapa 3 (§4.12). O resto da V0.2 e a V0.3 apenas delimitados (§9). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.6; [03 — Architecture](03-architecture.md) v0.2; [06 — Data & Integrations](06-data-integrations.md) v0.2; [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -333,6 +333,22 @@ Catálogo, definições exatas, minuto válido, disponibilidade e ponto válido 
 | RF-212 | Os decimais das entradas (doc 06 §5.3) devem virar FLOAT64 só na entrada do cálculo; a montagem e as camadas anteriores continuam em DECIMAL. | Must | doc 04 §5.1 | T, I |
 | RF-213 | O sistema deveria oferecer o comando `trader features --start --end --out <arquivo>`, que monta a série e grava num Parquet local as features de um período do desenvolvimento, para inspeção e conferência. | Should | F-12 | D |
 
+### 4.12 Datasets versionados e alvo (F-13) — V0.2, etapa 3
+
+Alvo, regra de operação e custos estão no doc 04 §4 e §9; formato, identificação e trava do holdout, no doc 04 §3.3 e §11 (v1.5, DEC-36); colunas novas de `minute_trades`, no doc 06 §5.6. Aqui ficam os comportamentos que o código precisa ter. O estudo de robustez de 2023 a 2025 (doc 04 §3.2) fica fora desta etapa (DEC-36).
+
+| ID | Requisito | Prior. | Origem | Verif. |
+|---|---|---|---|---|
+| RF-221 | O sistema deve calcular, por minuto, o preço e o horário do primeiro negócio com `trade_ts_us` maior ou igual ao início do minuto + 2,5 s e ao início do minuto + 4 s: o instante de decisão do minuto anterior mais a latência de execução base (0,5 s) e a de estresse (2 s) do doc 04 §9. Sem negócio nesse trecho do minuto, o preço fica nulo. O mesmo código serve ao arquivo, ao ao vivo e à V0.3 (RF-178). | Must | doc 04 §9, DEC-36 | T |
+| RF-222 | Os agregados do período de desenvolvimento da trilha A e das horas ao vivo devem ser recalculados com as colunas de RF-221, pelo job sob demanda e pelo pipeline do host, numa nova versão do esquema; o holdout da trilha A continua sem agregar (RF-179). | Must | DEC-36, DEC-31 | T, D |
+| RF-223 | Para cada minuto t e cada horizonte H ∈ {15, 60} min, o sistema deve calcular o retorno líquido da operação simulada, com entrada no preço de execução base do minuto t + 1 e saída no do minuto t + 1 + H, taxa f = 0,10% e deslizamento s = 0,01% por lado, contra a operação: r = P_saída · (1 − s) · (1 − f)² / (P_entrada · (1 + s)) − 1. O alvo é y = 1 se r > 0, e y = 0 se não (doc 04 §4.3 e §9). | Must | F-13, doc 04 §4.3 | T |
+| RF-224 | O alvo só é válido se os dois preços existirem e se todos os minutos de negócios de t + 1 a t + 1 + H forem válidos (doc 04 §3.4), incluindo a exceção de 23/10/2026 (RF-203). O cálculo nunca lê minutos depois do fim do período do dataset: um ponto cuja saída cairia depois dele fica sem alvo. | Must | doc 04 §3.4, IS-12 | T |
+| RF-225 | Um minuto t é ponto elegível de uma trilha, num horizonte, se for válido em todas as famílias do degrau mais alto da trilha (B6 na trilha A, B7 na B) e tiver alvo válido nesse horizonte. Os degraus B4 a B7 e os baselines B2 e B3 usam os mesmos pontos elegíveis (DEC-36). | Must | PRD Apêndice B, DEC-36 | T |
+| RF-226 | O dataset deve ser uma tabela por trilha e período, com uma linha por minuto: o início do minuto, t_d, as 59 features e a validade por família (RF-209) e, por horizonte, os preços de entrada e saída, o retorno líquido, o alvo, a validade do alvo e o ponto elegível. A tabela fica num Parquet local e em `derived/datasets/<id>/` no S3, com um manifesto JSON. | Must | F-13, doc 04 §11 | T, I |
+| RF-227 | O id do dataset deve ser um resumo SHA-256 da trilha, do período, da identificação do catálogo (RF-209), da versão do código, dos parâmetros do alvo (horizontes, custos, latência) e da lista de arquivos de entrada com seus SHA-256. O manifesto registra esses itens e o SHA-256 do Parquet. Construir de novo com as mesmas entradas e a mesma versão do código deve gerar o mesmo conteúdo (CA-07). Cada experimento cita o id do dataset, o degrau e o horizonte. | Must | F-13, CA-07 | T |
+| RF-228 | O construtor deve recusar os dias do holdout da trilha A (RF-204) e, na trilha B, os minutos a partir do congelamento registrado no código (doc 04 §3.3, regra 4), salvo com a opção da avaliação final. Toda construção com essa opção deve gravar um registro de acesso, só de acréscimo, em `derived/ops/holdout_access/` no S3 e marcar o manifesto como avaliação final; nesse caso, o comando não mostra estatísticas do alvo. | Must | IS-12, doc 04 §3.3 | T |
+| RF-229 | O sistema deveria oferecer o comando `trader dataset --track A\|B --start --end [--allow-holdout]`, que constrói o dataset, grava o Parquet local, envia ao S3 e mostra o id, os pontos elegíveis por horizonte e, fora da avaliação final, a fração de alvos positivos. | Should | F-13 | D |
+
 ---
 
 ## 5. Requisitos não funcionais
@@ -368,6 +384,7 @@ Catálogo, definições exatas, minuto válido, disponibilidade e ponto válido 
 | RNF-026 | Conformidade | O sistema deve respeitar os limites e os termos de uso da Binance. | RS-03, RN-015 | I |
 | RNF-028 | Desempenho | Montar a série e calcular as features de 9 meses de minutos (~393 mil) no MacBook em até 10 min, com até 4 GiB de memória no processo [PROPOSTA]. | doc 04 §12 | T, A |
 | RNF-029 | Dependências | O cálculo das features usa `numpy` (DEC-34), num grupo opcional de pesquisa, fora do artefato do host até a V0.3 precisar das features ao vivo; o grupo precisa ter pacotes para macOS ARM64 e Linux ARM64 e x86_64 (RNF-022). | DEC-34, RNF-022 | I |
+| RNF-030 | Desempenho | Construir o dataset do desenvolvimento da trilha A (9 meses) no MacBook em até 15 min, com até 4 GiB de memória no processo, fora o download do cache [PROPOSTA]. | doc 04 §12 | T, A |
 
 ---
 
@@ -516,7 +533,7 @@ Estes requisitos serão escritos em versão futura do SRS, depois dos documentos
 | Versão | Grupo | Funcionalidades | Faixa de ids | Depende de |
 |---|---|---|---|---|
 | V0.2 | Features point-in-time | F-12 | RF-201–RF-219 | **Detalhado em §4.11** (RF-201 a RF-213, v0.10) |
-| V0.2 | Datasets versionados | F-13 | RF-221–RF-229 | Doc 04, doc 06 |
+| V0.2 | Datasets versionados | F-13 | RF-221–RF-229 | **Detalhado em §4.12** (RF-221 a RF-229, v0.11) |
 | V0.2 | Baselines, treinamento e validação | F-14, F-15, F-16 | RF-231–RF-249 | Doc 04 (targets, walk-forward, holdout) |
 | V0.2 | Backtester com custos | F-17 | RF-251–RF-269 | Docs 04 e 05 (custos, modelo de preenchimento) |
 | V0.2 | Ablações, registro e relatórios | F-18, F-19, F-20 | RF-271–RF-289 | Docs 04 e 07 |
@@ -545,6 +562,7 @@ Requisitos da V0.1 que já servem às versões seguintes: replay (RF-134) para a
 | F-10 Monitoramento | RF-161–RF-166; RNF-018 | UC-07, UC-08 | CA-01 |
 | F-11 Agregações | RF-171–RF-179, RNF-027 | — | IS-03 |
 | F-12 Features (V0.2) | RF-201–RF-213; RNF-028, RNF-029 | — | IS-11, CA-08 |
+| F-13 Datasets (V0.2) | RF-221–RF-229; RNF-030 | — | IS-12, CA-07 |
 | Transversal: operação | RF-181–RF-187 | UC-01, UC-07 | — |
 | Transversal: segurança e custo | RN-001, RN-012, RN-015; RNF-013–RNF-017, RNF-023–RNF-025 | — | — |
 
@@ -593,3 +611,4 @@ Nenhuma pendência aberta que afete a V0.1. Resolvidas em 23/10/2026: PD-06 → 
 | 0.8 | 06/11/2026 | Aprovado em 06/11/2026 (DEC-32). Etapa 1 da V0.2: RF-172 e RF-173 passam a Must; RF-174 a RF-179 (agregados por minuto), RF-187 (processamento sob demanda) e RNF-027. |
 | 0.9 | 07/11/2026 | Aprovado em 07/11/2026. RF-160: o início de uma coleta sem sessão anterior também é conferido (doc 06 §8.1). |
 | 0.10 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-35). Etapa 2 da V0.2 (DEC-34): §4.11 com RF-201 a RF-213 (features point-in-time), RNF-028 e RNF-029; §9 e §10 atualizados. |
+| 0.11 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-37). Etapa 3 da V0.2 (DEC-36): §4.12 com RF-221 a RF-229 (preço de execução por minuto, alvo, pontos elegíveis, tabela e identificação do dataset, trava do holdout) e RNF-030; §9 e §10 atualizados. |

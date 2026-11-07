@@ -1,6 +1,6 @@
 """Linha de comando: `collect`, `collector-ready`, `status`, `pipeline`, `reconcile`, `backfill`,
-`aggregates`, `features`, `quality`, `dashboard-data`, `status-publisher` e `smoke` (RF-181 a
-RF-187, RF-213)."""
+`aggregates`, `features`, `dataset`, `quality`, `dashboard-data`, `status-publisher` e `smoke`
+(RF-181 a RF-187, RF-213, RF-229)."""
 
 import argparse
 import asyncio
@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 from collections.abc import Sequence
-from datetime import date
+from datetime import UTC, date, datetime
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
@@ -56,6 +56,7 @@ PIPELINE_COMMANDS = (
     "backfill",
     "aggregates",
     "features",
+    "dataset",
     "quality",
     "dashboard-data",
     "status-publisher",
@@ -131,6 +132,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--allow-holdout",
         action="store_true",
         help="só na avaliação final: permite o holdout da trilha A (RF-204)",
+    )
+
+    dataset = commands.add_parser(
+        "dataset", help="dataset de uma trilha e período: features e alvo (RF-229)"
+    )
+    dataset.add_argument("--config", type=Path, help="TOML com replica_s3_bucket para ler do S3")
+    dataset.add_argument("--data-dir", type=Path, help="cache local (com S3) ou diretório de dados")
+    dataset.add_argument("--replica-dir", type=Path, help="réplica local (desenvolvimento)")
+    dataset.add_argument("--track", required=True, choices=("A", "B"), help="trilha (doc 04 §3.2)")
+    dataset.add_argument("--start", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
+    dataset.add_argument("--end", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
+    dataset.add_argument(
+        "--out-dir", type=Path, default=Path("data/datasets"), help="pasta local do Parquet"
+    )
+    dataset.add_argument(
+        "--allow-holdout",
+        action="store_true",
+        help="só na avaliação final: permite o holdout e grava o registro de acesso (RF-228)",
     )
 
     quality = commands.add_parser(
@@ -215,6 +234,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_aggregates(pipeline_config, args)
     if args.command == "features":
         return run_features(pipeline_config, args)
+    if args.command == "dataset":
+        return run_dataset(pipeline_config, args)
     if args.command == "quality":
         return quality_report(pipeline_config, args.start, args.end, args.json)
     if args.command == "dashboard-data":
@@ -554,6 +575,82 @@ def run_features(config: PipelineConfig, args: argparse.Namespace) -> int:
     if minutes.holdout_days:
         print(f"inclui {minutes.holdout_days} dia(s) do holdout (avaliação final)")
     print(f"catálogo {metadata['catalog_id']} → {args.out}")
+    return 0
+
+
+def run_dataset(config: PipelineConfig, args: argparse.Namespace) -> int:
+    """Constrói o dataset de uma trilha e período (doc 03 §5.2; RF-229). O `numpy` só é importado
+    aqui, como em `features` (RNF-029)."""
+    import getpass
+    import resource
+    import socket
+
+    try:
+        from trader.datasets.labels import LabelParams
+        from trader.pipeline.datasets import DatasetRequest, build_dataset, code_version
+        from trader.pipeline.minutes import CachedS3Source, LocalSource, Source
+        from trader.storage.objectstore import LocalDirectoryStore, ObjectStore, S3ObjectStore
+        from trader.storage.s3cache import S3Cache
+    except ImportError as exc:
+        print(f"falta o grupo de pesquisa (numpy): {exc}", file=sys.stderr)
+        return 2
+
+    began = time.monotonic()
+    source: Source
+    store: ObjectStore
+    cache = None
+    if config.replica_s3_bucket:
+        import boto3  # só o pipeline e a CLI usam o SDK da AWS (ADR-03)
+
+        client = boto3.session.Session(region_name=config.aws_region).client("s3")
+        cache = S3Cache(client, config.replica_s3_bucket, config.data_dir)
+        source = CachedS3Source(cache)
+        store = S3ObjectStore(client, config.replica_s3_bucket)
+    else:
+        root = config.replica_dir or config.data_dir
+        source, store = LocalSource(root), LocalDirectoryStore(root)
+    code = code_version()
+    if code.endswith(".dirty"):
+        print(f"aviso: código com mudanças sem commit ({code})", file=sys.stderr)
+    request = DatasetRequest(args.track, args.start, args.end, args.allow_holdout, LabelParams())
+    try:
+        built = build_dataset(
+            source,
+            symbol=config.symbol,
+            kline_channel=config.streams[1],
+            request=request,
+            code=code,
+            out_dir=args.out_dir,
+            store=store,
+            now=datetime.now(UTC),
+            who=f"{getpass.getuser()}@{socket.gethostname()}",
+        )
+    except HoldoutRefused as exc:
+        print(f"recusado: {exc}", file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    finally:
+        if cache is not None:
+            cache.save()
+    peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (
+        1 << 20 if sys.platform == "darwin" else 1 << 10
+    )
+    if cache is not None:
+        print(f"S3: {cache.downloaded} arquivo(s) baixado(s), {cache.unchanged} sem mudança")
+    print(f"dataset {built.dataset_id} (trilha {args.track}) · minutos: {built.minutes}")
+    for h, n in built.eligible.items():
+        line = f"  H = {h} min: {n} pontos elegíveis ({n / max(built.minutes, 1):.1%})"
+        if built.positives is not None:
+            line += f" · alvo positivo em {built.positives[h] / max(n, 1):.1%}"
+        print(line)
+    if built.positives is None:
+        print("avaliação final: registro de acesso gravado; sem estatísticas do alvo (RF-228)")
+    for warning in built.warnings:
+        print(f"aviso: {warning}")
+    print(f"tempo: {time.monotonic() - began:.1f} s · pico de memória: {peak_mb:.0f} MB")
+    print(f"→ {built.path} e derived/datasets/{built.dataset_id}/")
     return 0
 
 

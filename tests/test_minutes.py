@@ -20,6 +20,7 @@ from trader.core.timeunits import MINUTE_US, SECOND_US
 from trader.features.compute import FEATURES, catalog_id
 from trader.features.series import BOOK_FIELDS, MINUTES
 from trader.pipeline.minutes import (
+    EXEC_COLUMNS,
     CachedS3Source,
     LocalSource,
     Minutes,
@@ -100,12 +101,24 @@ def trade_rows(
             "last_recv_ts_us": recv.get(ts, None if source == "archive" else ts + MINUTE_US),
             "size_bins_count": [0] * (BINS - 1) + [10],
             "size_bins_volume": [Decimal(0)] * (BINS - 1) + [Decimal("2.5")],
+            **execution(ts),
             "status": status.get(ts, "ok"),
             "source": source,
-            "schema_version": 1,
+            "schema_version": 2,
         }
         for ts in minutes
     ]
+
+
+def execution(ts: int) -> dict[str, Any]:
+    if ts == NO_EXECUTION:
+        return dict.fromkeys(EXEC_COLUMNS)
+    return {
+        "exec_price_2500ms": price(ts) + Decimal("0.5"),
+        "exec_ts_2500ms_us": ts + 2_600_000,
+        "exec_price_4000ms": price(ts) + 1,
+        "exec_ts_4000ms_us": ts + 4_100_000,
+    }
 
 
 def book_rows(minutes: list[int], status: dict[int, str]) -> list[dict[str, Any]]:
@@ -159,6 +172,7 @@ INVALID_BOOK = at(22, 5)
 EXCEPTION = int(datetime(2026, 10, 23, 22, 44, tzinfo=UTC).timestamp()) * SECOND_US
 ARCHIVE_GAP = at(3, 0, ARCHIVE_DAY)
 ARCHIVE_MISSING_TRADES = at(4, 0, ARCHIVE_DAY)
+NO_EXECUTION = at(22, 55)
 
 
 def build_data(root: Path) -> Path:
@@ -306,6 +320,42 @@ def test_complete_day_skips_the_copy_with_the_same_result(tmp_path: Path) -> Non
     assert archive.table.equals(both.table.slice(1440))
 
 
+def test_execution_prices_come_apart_from_the_series(tmp_path: Path) -> None:
+    """RF-221: o preço de execução vai para uma tabela à parte, nunca para `MINUTES`."""
+    root = build_data(tmp_path)
+    plain = assemble(root)
+    minutes = assemble(root, execution=True)
+    assert plain.execution is None
+    assert minutes.table.equals(plain.table)
+    assert not set(EXEC_COLUMNS) & set(MINUTES.names)
+    prices = minutes.execution
+    assert prices is not None
+    assert prices.column_names == ["minute_ts_us", *EXEC_COLUMNS]
+    assert prices["minute_ts_us"].equals(minutes.table["minute_ts_us"])
+    first = at(22, 0)
+    assert prices.slice(row_of(first), 1).to_pylist()[0] == {
+        "minute_ts_us": first,
+        "exec_price_2500ms": price(first) + Decimal("0.5"),
+        "exec_ts_2500ms_us": first + 2_600_000,
+        "exec_price_4000ms": price(first) + 1,
+        "exec_ts_4000ms_us": first + 4_100_000,
+    }
+    base = prices["exec_price_2500ms"].to_pylist()
+    assert base[row_of(NO_EXECUTION)] is None
+    assert base[row_of(at(23, 0))] is None, "hora sem agregado"
+    assert base[row_of(ARCHIVE_START)] == price(ARCHIVE_START) + Decimal("0.5")
+
+
+def test_old_trade_aggregates_are_refused_for_execution(tmp_path: Path) -> None:
+    """Agregados da versão 1, sem preço de execução, servem às features, mas não ao alvo."""
+    root = build_data(tmp_path)
+    path = root / "derived/minute_trades" / f"symbol={SYMBOL}" / "date=2026-10-24/archive.parquet"
+    pq.write_table(pq.read_table(path).drop_columns(list(EXEC_COLUMNS)), path)
+    assert assemble(root).table.num_rows == 2880
+    with pytest.raises(ValueError, match=r"sem as colunas exec_price_2500ms.*RF-222"):
+        assemble(root, execution=True)
+
+
 def test_holdout_days_are_refused_unless_final_evaluation(tmp_path: Path) -> None:
     root = build_data(tmp_path)
     with pytest.raises(HoldoutRefused, match="RF-204"):
@@ -375,5 +425,7 @@ def test_cli_does_not_need_numpy() -> None:
         "import trader.cli.main\n"
         "assert not any(m.startswith('trader.features') for m in sys.modules)\n"
         "assert 'trader.pipeline.minutes' not in sys.modules\n"
+        "assert not any(m.startswith('trader.datasets') for m in sys.modules)\n"
+        "assert 'trader.pipeline.datasets' not in sys.modules\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True)

@@ -4,9 +4,9 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 04 — AI & Quantitative Research |
-| Versão | 1.4 — aprovado |
+| Versão | 1.5 — aprovado |
 | Escopo desta versão | Método de pesquisa da V0.2: dados e períodos, formulação do problema, features, baselines, modelos, validação, custos, métricas, critérios de G2 a pré-registrar, registro de experimentos e plano de trabalho. |
-| Status | Aprovado em 26/10/2026 (DEC-28); v1.4 aprovada em 07/11/2026 (DEC-35). Decisões PD-15 a PD-23 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
+| Status | Aprovado em 26/10/2026 (DEC-28); v1.4 aprovada em 07/11/2026 (DEC-35); v1.5 aprovada em 07/11/2026 (DEC-37), com a etapa 3 (DEC-36). Decisões PD-15 a PD-23 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
 | Data | 26/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.8; [02 — SRS](02-srs.md) v0.5; [03 — Architecture](03-architecture.md) v0.8; [06 — Data & Integrations](06-data-integrations.md) v0.8 |
 
@@ -86,7 +86,7 @@ O livro de ofertas só existe a partir da coleta, e as ablações exigem a mesma
 - **Trilha A — histórico (B0 a B6):** 23/10/2025 a 22/10/2026, a janela em que há negócios. Responde H-01, H-02 e a parte 1 de H-03. Pode começar logo depois da aprovação deste documento, sem esperar G1, porque usa arquivos públicos (PRD §8.3).
 - **Trilha B — com livro (B0 a B7):** de 23/10/2026 em diante. Responde a parte 2 de H-03 e H-04. Começa depois de G1 e de acumular dados suficientes (§13).
 
-**[DECISÃO] PD-22:** os candles de 2023 a 2025 entram como **estudo de robustez** de B3, B4 e B5 (mesmo método, outra época), e não no walk-forward oficial. Servem para ver se um resultado da trilha A depende de um único regime de mercado (R-06).
+**[DECISÃO] PD-22:** os candles de 2023 a 2025 entram como **estudo de robustez** de B3, B4 e B5 (mesmo método, outra época), e não no walk-forward oficial. Servem para ver se um resultado da trilha A depende de um único regime de mercado (R-06). O preço de execução do alvo vem dos negócios (§9), que só existem a partir de 23/10/2025; a regra de preço do estudo, a partir dos candles, será definida quando ele for planejado, depois dos resultados da trilha A (DEC-36, §15).
 
 ### 3.3 Desenvolvimento e holdout (pré-registro)
 
@@ -143,12 +143,19 @@ Motivo: com custo de ~0,22% por operação completa (§9), o preço precisa anda
 - Usar o retorno líquido no alvo alinha o que o modelo aprende com o que interessa (lucro depois de custos), em vez de prever direção pura.
 - Barreiras triplas (alvo de lucro, stop e tempo) ficam como extensão depois do primeiro ciclo, porque acrescentam parâmetros e testes.
 
+**Cálculo exato [DECISÃO] DEC-36.** A entrada é no preço de execução base (§9) do minuto t + 1, e a saída no do minuto t + 1 + H. Com taxa f e deslizamento s por lado, cobrados contra a operação, o retorno líquido é
+
+r = P_saída · (1 − s) · (1 − f)² / (P_entrada · (1 + s)) − 1,
+
+e y = 1 se r > 0. A taxa sai do ativo recebido em cada lado, como na Binance: a compra recebe (1 − f) do BTC, e a venda recebe (1 − f) dos USDT. Com os valores base, r ≈ retorno do preço − 0,22%. O alvo só é válido se os dois preços existirem e se todos os minutos de negócios de t + 1 a t + 1 + H forem válidos (§3.4); nunca usa minutos depois do fim do período do dataset, de modo que um dataset de desenvolvimento não encosta no holdout.
+
 ### 4.4 Regra de operação
 
 - Só long/flat (DEC-14): entrar comprado ou ficar fora.
 - Saída por tempo: exatamente H minutos depois da entrada.
 - Sem sobreposição: com posição aberta, novos sinais são ignorados.
 - Tamanho fixo (todo o capital simulado por operação, sem alavancagem — RN-003). Resultados em percentual; o dimensionamento fica no doc 05.
+- **Pontos elegíveis [DECISÃO] DEC-36:** numa trilha e num horizonte, um minuto só é ponto de decisão se for válido em todas as famílias do degrau mais alto da trilha (B6 na A, B7 na B) e tiver alvo válido. Os degraus B4 a B7 e os baselines B2 e B3 usam os mesmos pontos: a diferença entre degraus vem só da informação a mais (PRD, Apêndice B). No desenvolvimento da trilha A, isso deixa 99,6% dos minutos com features válidas (doc 03, MD-30), antes da validade do alvo.
 
 ---
 
@@ -306,12 +313,14 @@ Depois do desenvolvimento, para cada degrau e horizonte, o modelo final é trein
 
 | Item | Valor base | Sensibilidade |
 |---|---|---|
-| Taxa por lado (taker) | 0,10% [A VERIFICAR: taxa padrão de spot da Binance] | 0,075% (desconto em BNB) e 0,15% (estresse) |
+| Taxa por lado (taker) | 0,10% (usuário comum; verificada em 07/11/2026 em binance.com/en/fee/trading) | 0,075% (desconto em BNB) e 0,15% (estresse) |
 | Spread e deslizamento por lado | 0,01% | 0 e 0,03% |
 | Latência de execução | 0,5 s depois de t_d | 2 s |
 | Preço de entrada e saída | Primeiro negócio depois de t_d + latência, ajustado pelo deslizamento contra a operação | — |
 
 Custo base por operação completa: ~0,22%. Toda estratégia (B1 a B7) usa o mesmo modelo. O resultado é sempre apresentado com os três cenários de taxa.
+
+**Preço de execução [DECISÃO] DEC-36.** Uma decisão em t_d = fim do minuto t + 2 s chega à corretora em t_d + latência, ou seja, no início do minuto t + 1 mais 2,5 s (base) ou 4 s (estresse). O preço é o do primeiro negócio com `trade_ts_us` a partir desse instante, calculado por minuto nos agregados (`minute_trades`, doc 06 §5.6) a partir dos negócios brutos; sem negócio até o fim do minuto, o preço fica nulo e o ponto não tem alvo. Vale para o alvo (§4.3) e para o simulador da etapa 4. Os dados ao vivo usam o mesmo horário da corretora (`trade_ts_us`), não o de recebimento.
 
 Ordens a mercado (taker) são a hipótese conservadora; executar como maker (ordem limitada) reduziria a taxa, mas com risco de não ser executado. Esse modelo de preenchimento é do doc 05 e deve ser o mesmo do paper trading (PP-05); este documento será revisto quando o doc 05 existir.
 
@@ -346,7 +355,8 @@ Os critérios estão congelados desde 26/10/2026 (commit que registra esta vers�
 
 ## 11. Registro de experimentos e versionamento de datasets
 
-- **Dataset** (F-13): identificado por um resumo (hash) de: período, horizonte, família de features, commit do código de features e lista de arquivos normalizados com seus SHA-256. Gravado em Parquet em `derived/datasets/<id>/` com um manifesto JSON; reconstruível a partir dos dados normalizados (CA-07).
+- **Dataset** (F-13) [DECISÃO] DEC-36: uma tabela por trilha e período, com uma linha por minuto: as 59 features, a validade por família e, para os dois horizontes, preços de entrada e saída, retorno líquido, alvo, validade do alvo e ponto elegível (§4.4). Identificada por um resumo (hash) de trilha, período, catálogo de features, versão do código, parâmetros do alvo e lista de arquivos de entrada com seus SHA-256. Gravada em Parquet em `derived/datasets/<id>/` com um manifesto JSON; reconstruível a partir dos dados normalizados e dos agregados (CA-07). Cada experimento escolhe nela as colunas do degrau e os pontos elegíveis do horizonte, e registra o id do dataset, o degrau e o horizonte. Uma tabela só, em vez de uma por degrau e horizonte, evita repetir os mesmos dados (~110 MB no desenvolvimento da trilha A) e garante que todos os degraus vejam os mesmos minutos.
+- **Acesso ao holdout:** construir um dataset com a opção da avaliação final grava um registro, só de acréscimo, em `derived/ops/holdout_access/`; o manifesto do dataset fica marcado como avaliação final.
 - **Experimento** (F-19): toda execução recebe um id e registra, **antes** de rodar, trilha, degrau, horizonte, modelo, grade, semente, dataset e commit; ao terminar, as métricas. Execuções descartadas, com erro ou repetidas continuam no registro (IS-13).
 - O número de tentativas por trilha, usado no IS-15, é a contagem do registro.
 - Armazenamento: SQLite local no MacBook, exportado para `derived/experiments/` no S3 a cada execução. Sem MLflow ou serviços externos (PP-07).
@@ -375,7 +385,7 @@ Os critérios estão congelados desde 26/10/2026 (commit que registra esta vers�
 |---|---|---|
 | 1 | Agregados por minuto de negócios (PD-23, EC2 dedicada) e de livro | Seção da EC2 dedicada no doc 03; requisitos da etapa no SRS |
 | 2 | Biblioteca de features com testes de point-in-time (F-12) | 1 |
-| 3 | Construtor de datasets versionados e trava do holdout (F-13, §3.3) | 2 |
+| 3 | Preço de execução por minuto nos agregados, alvo, construtor de datasets versionados e trava do holdout (F-13, §3.3, §4.3, §9) | 2 |
 | 4 | Simulador de operações com custos e baselines B0 a B3 (F-14, F-17) | 3 |
 | 5 | Registro de experimentos (F-19) | 3 |
 | 6 | Trilha A: walk-forward de B4 a B6, ablações, relatório de desenvolvimento | 4, 5 |
@@ -404,15 +414,16 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 
 | Item | Onde se resolve |
 |---|---|
-| Taxa de spot da Binance em vigor | [A VERIFICAR] antes da etapa 4 |
+| Taxa de spot da Binance em vigor | **Resolvido em 07/11/2026:** 0,100% por lado para usuário comum e 0,075% com BNB (binance.com/en/fee/trading); valor base de §9 mantido |
 | Plano gratuito libera instâncias c7g (PD-23) | **Resolvido em 06/11/2026:** não libera. O `--dry-run` foi aceito, mas a execução real foi recusada; tipo trocado para c7i-flex.large (DEC-33, doc 03 §7.8) |
 | Seção da EC2 dedicada (rede, IAM, lançamento) | Aprovada no doc 03 §7.8 (06/11/2026, DEC-32) |
 | Franquia de saída de dados do S3 no plano gratuito | [A VERIFICAR] só se o plano B (MacBook) for usado |
 | p99 do atraso ao vivo (PD-19) | **Resolvido:** 119 ms em negócios e 174 ms em candles na semana do CA-01 (doc 06 §8.6); L = 1 s mantida |
 | Modelo de preenchimento final e limites de drawdown | Doc 05 |
 | Degradação tolerada paper × backtest (H-05) | Doc 07 |
-| Requisitos RF-201 a RF-289 | SRS, antes de cada etapa: RF-201 a RF-213 (etapa 2, features) no SRS v0.10 |
-| Comparar os degraus de uma trilha nos mesmos pontos: a validade vem por família (§5.3), e o PRD (Apêndice B) pede a mesma janela; falta fixar se cada degrau usa os pontos válidos nele ou os válidos no degrau mais alto da trilha | Etapa 3 (datasets) |
+| Requisitos RF-201 a RF-289 | SRS, antes de cada etapa: RF-201 a RF-213 (etapa 2, features) no SRS v0.10; RF-221 a RF-229 (etapa 3, datasets) no SRS v0.11 |
+| Comparar os degraus de uma trilha nos mesmos pontos | **Resolvido em 07/11/2026 (DEC-36):** todos usam os pontos válidos no degrau mais alto da trilha e com alvo válido (§4.4) |
+| Regra do preço de execução no estudo de robustez de 2023 a 2025, que só tem candles (§3.2) | Quando o estudo for planejado, depois dos resultados da trilha A (DEC-36) |
 
 ---
 
@@ -444,3 +455,4 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | 1.2 | 06/11/2026 | Pendências da PD-23 atualizadas: c7g verificado; seção da EC2 escrita no doc 03 §7.8. Método sem mudança. |
 | 1.3 | 06/11/2026 | §12 e §15: c7g recusado pelo plano gratuito na primeira execução; instância passa a c7i-flex.large (DEC-33); tempo da primeira execução medido. Método sem mudança. |
 | 1.4 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-35), com os requisitos da etapa 2. DEC-34: §5.1, janelas fixas e valor indefinido tornando o ponto inválido; §5.2, ajustes do catálogo (desequilíbrio assinado relativo ao volume de 24 h, taxa de chegada fora de B6, janelas que faltavam); §5.3, definições exatas das 59 features, minuto válido, disponibilidade e ponto válido; §12, `numpy`. |
+| 1.5 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-37), com os requisitos da etapa 3. DEC-36: §4.3, cálculo exato do retorno líquido e validade do alvo; §4.4, pontos elegíveis iguais para todos os degraus da trilha; §9, taxa verificada e preço de execução por minuto a partir dos negócios; §11, uma tabela por trilha e período e registro de acesso ao holdout; §3.2 e §15, regra de preço do estudo de robustez adiada; §13, etapa 3 atualizada. |

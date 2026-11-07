@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.21 — rascunho |
+| Versão | 0.23 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -157,11 +157,12 @@ trader/
   recovery/    estratégias de recuperação por canal
   aggregate/   agregados por minuto de negócios e do livro (doc 06 §5.6)    (sem E/S; mesmo código em lote e ao vivo)
   features/    features point-in-time da V0.2 (doc 04 §5.3)              (sem E/S; mesmo código em pesquisa e operação)
+  datasets/    alvo, pontos elegíveis e tabela do dataset (doc 04 §4, §11) (sem E/S)
   pipeline/    rodada horária: órfãos, compressão, normalização por hora, máscara, exportações,
                réplica e retenção; backfill dos arquivos públicos (doc 06 §7);
                relatório de qualidade (doc 06 §8.3); dados do painel da coleta (doc 06 §8.4);
                publicador da página pública de status (§7.7); agregados por minuto (§7.8);
-               montagem da série de minutos para as features (§5.1)
+               montagem da série de minutos para as features (§5.1); construção dos datasets (§5.2)
   public/      página pública de status (HTML estático, sem bibliotecas externas; §7.7)
   ops/         configuração, logs estruturados, StatsD, saúde, estado SQLite
   cli/         comandos
@@ -204,6 +205,36 @@ S3 (normalized/, derived/) ── cache local ──▶ pipeline/minutes: série
 - **Testes** (`tests/test_features.py`, `tests/test_minutes.py`): cada feature contra uma implementação de referência minuto a minuto, validade e disponibilidade nos limites das janelas, perturbação de tudo o que vem depois de t_d (RF-210), paridade com os últimos 1.500 minutos em pontos com minutos inválidos e atrasados (RF-206), determinismo (RF-211), montagem com dias de arquivo e ao vivo, exceção de 23/10/2026, recusa do holdout, cache do S3 e CLI sem `numpy` (RNF-029).
 
 **MD-30 — medição da etapa 2 (07/11/2026, MacBook, RNF-028):** período de desenvolvimento da trilha A (23/10/2025 a 22/07/2026: 273 dias de arquivo, 393.120 minutos), lido do S3 para um cache local de 144 MB (546 arquivos de candles e `minute_trades`). Com o cache cheio, a montagem levou 5,1 s e o cálculo 4,1 s (11 s no total), com pico de 2,5 GB no processo (RNF-028: até 10 min e 4 GiB). A primeira execução, que baixa o cache, levou 4 min 21 s. A primeira versão chegava a 3,7 GB, porque o `take` do Arrow junta os pedaços de cada dia antes de copiar; agora a montagem usa as colunas lidas direto quando já há uma linha por minuto, em ordem, e o cálculo guarda as contagens das faixas em int32. Pontos válidos: 99,9% em candles e 99,6% em volume e em fluxo. Os inválidos são exatamente os minutos sem histórico no início do período (240, 1.439 e 1.499): nenhum minuto de arquivo inválido no período. Livro: 0%, porque os dias de arquivo não têm livro (doc 06 §5.6). Saída: Parquet de 105 MB em `data/features/`, fora do Git.
+
+### 5.2 Datasets da V0.2 (etapa 3; DEC-36; SRS §4.12)
+
+```text
+negócios (arquivo e ao vivo) ── aggregate: minute_trades v2, com preço de execução (RF-221)
+S3 (normalized/, derived/) ── cache local ──▶ pipeline/minutes ──▶ features (59, validade por família)
+                                                     └── colunas de execução ──▶ datasets: alvo e pontos elegíveis
+      ──▶ pipeline/datasets: Parquet local + derived/datasets/<id>/ (data.parquet, manifest.json)
+```
+
+- **Preço de execução nos agregados** (`aggregate/trades.py`): ao agregar os negócios de um minuto, guarda o primeiro negócio a partir de 2,5 s e de 4 s depois do início do minuto (doc 06 §5.6, versão 2 do esquema). O pipeline horário do host passa a gravar a versão 2 nas horas novas (troca de versão comum, §8). O job sob demanda (§7.8) refaz a versão 1 já gravada: os 273 dias do desenvolvimento da trilha A e as horas ao vivo desde 23/10/2026. O holdout da trilha A continua sem agregar (RF-179).
+- **Montagem:** `pipeline/minutes` lê também as colunas de execução, mas elas ficam fora da série das features (`MINUTES`) e vão só para o alvo: nenhuma feature as vê (doc 06 §5.6).
+- **Alvo e pontos** (`datasets/`, sem E/S, em `numpy`): retorno líquido e alvo por horizonte (doc 04 §4.3), validade do alvo pelos minutos de negócios da janela e pelo fim do período, e ponto elegível pela validade do degrau mais alto da trilha (doc 04 §4.4). Os preços passam de DECIMAL para FLOAT64 só aqui, como nas features (RF-212).
+- **Construção** (`pipeline/datasets`, comando `trader dataset`, RF-229): monta, calcula features e alvo, grava o Parquet em `data/datasets/<id>.parquet` e envia ao S3 `derived/datasets/<id>/data.parquet` com `manifest.json` (RF-226, RF-227). O id resume trilha, período, catálogo, versão do código, parâmetros do alvo e entradas; refazer com as mesmas entradas gera o mesmo arquivo.
+- **Trava do holdout** (RF-228): a trilha A usa a mesma regra da montagem (`core/holdout.py`, RF-204). A trilha B recebe, no commit de congelamento (doc 04 §3.3, regra 4), o instante a partir do qual tudo é holdout; até lá, não há holdout B a recusar. Com a opção da avaliação final, o construtor grava um registro de acesso em `derived/ops/holdout_access/<data e hora>.json` (quem, quando, período, id do dataset) antes de ler qualquer dado do holdout, e o comando não mostra estatísticas do alvo.
+- **Quem grava no S3:** o MacBook, com o perfil `trader` (`derived/datasets/` e `derived/ops/holdout_access/`). O papel da instância sob demanda continua só com leitura de `normalized/trades/` e gravação em `derived/minute_trades/`.
+- **Custo (RN-012):** refazer os agregados leva ~8 min de instância para o desenvolvimento e alguns minutos para as horas ao vivo, ~US$ 0,02 no total, dentro da estimativa já aprovada de ~US$ 0,10 por execução (doc 04 §12). Cada dataset ocupa ~110 a 140 MB no S3 (~US$ 0,003/mês) e no disco do MacBook.
+- **Tamanho e tempo:** a construção do desenvolvimento da trilha A reaproveita o cache das features (MD-30) e baixa de novo só os ~125 MB de `minute_trades` refeitos na versão 2; até 15 min e 4 GiB (RNF-030).
+
+**Implementação (07/11/2026).** Módulos `aggregate/trades.py` (preço de execução), `pipeline/minutes.py` (colunas de execução à parte), `datasets/labels.py` (alvo, pontos elegíveis e tabela, sem E/S) e `pipeline/datasets.py` (construção, id, manifesto, envio e trava do holdout); comando `trader dataset` (RF-229). Detalhes que o texto acima não fixava:
+
+- **Preço de execução sem ordem.** Em cada lote, o primeiro negócio a partir de cada instante sai do menor (`trade_ts_us`, `trade_id`), e a junção dos lotes guarda o menor par: o resultado não depende da ordem dos lotes nem das linhas (RF-173). Só usa `pyarrow`, porque o pacote `aggregate` roda no host (RNF-029). O esquema de `minute_trades` passa à versão 2; o de `minute_book` continua na 1.
+- **Versão 1 recusada no alvo.** Com as colunas de execução, a montagem confere o esquema de cada arquivo antes de ler e recusa o que não as tem, com a indicação de refazer os agregados (RF-222). As features continuam aceitando a versão 1.
+- **Colunas da tabela.** Além das features, de `decision_ts_us` e de `valid_<família>`: `entry_price` (uma coluna só, porque a entrada é a mesma nos dois horizontes) e, por horizonte, `exit_price_h<H>`, `net_return_h<H>`, `target_h<H>` (nulo onde o alvo não é válido), `target_valid_h<H>` e `eligible_h<H>`. Na trilha A, as features do livro ficam nulas e o degrau mais alto é candles + volume + fluxo (B6).
+- **Id.** Os 16 primeiros dígitos do SHA-256 do JSON canônico com trilha, período, símbolo, catálogo, versão do código, parâmetros do alvo (horizontes, taxa, deslizamento, latência e a coluna de preço), a opção da avaliação final e a lista de entradas com SHA-256. A opção entra no id para que um dataset de avaliação final nunca substitua um de desenvolvimento com o mesmo período. A versão do código junta a versão do pacote e o commit (`0.1.0.dev0+g<commit>`), com `.dirty` se `src/`, `pyproject.toml` ou `uv.lock` têm mudanças sem commit; o comando avisa nesse caso.
+- **Mesmo arquivo, byte a byte.** Os metadados do Parquet (`mevis.dataset`) guardam a identificação sem a lista de entradas (só a contagem e o SHA-256 dela) e sem a hora da construção, que fica no manifesto. Um teste constrói duas vezes e compara os bytes (CA-07).
+- **Manifesto.** Local em `<pasta>/<id>.manifest.json` e no S3 em `derived/datasets/<id>/manifest.json`: identificação completa, SHA-256 do Parquet, linhas, colunas, pontos elegíveis por horizonte, hora e autor da construção, dias de arquivo, horas ao vivo, avisos e a marca da avaliação final.
+- **Trava do holdout em duas etapas.** O holdout da trilha A e o congelamento da trilha B (`HOLDOUT_B_START` em `core/holdout.py`, `None` até o commit de congelamento) valem para as duas trilhas: são dias de dados reservados, seja qual for a trilha pedida. Com a avaliação final, o registro `derived/ops/holdout_access/<data e hora>.json` (quem, quando, trilha, período, versão do código) vai antes de qualquer leitura, quando o id ainda não existe, porque ele depende dos SHA-256 das entradas; depois da construção, `<data e hora>.result.json` acrescenta o id e o SHA-256 do Parquet. Nenhum dos dois substitui um registro anterior, porque a hora no nome tem microssegundos.
+- **Saída do comando.** Pontos elegíveis por horizonte e, fora da avaliação final, a fração de alvos positivos entre eles; tempo, pico de memória e o caminho do Parquet.
+- **Testes** (`tests/test_aggregate_trades.py`, `tests/test_minutes.py`, `tests/test_datasets.py`): preço de execução nos limites de 2,5 s e 4 s, empate pelo menor id e independência da ordem; colunas de execução fora de `MINUTES` e recusa da versão 1; fórmula do alvo contra frações exatas, validade pelos minutos de t + 1 a t + 1 + H, preço ausente e fim do período; o alvo só lê os minutos de entrada e saída; pontos elegíveis por trilha; construção com cópia no armazenamento, id e bytes repetidos, mudança de entrada mudando o id, trava do holdout A antes de qualquer leitura, registro de acesso antes da leitura e congelamento da trilha B; comando e CLI sem `numpy`.
 
 ---
 
@@ -639,3 +670,5 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.19 | 07/11/2026 | §7.8: segunda execução (horas ao vivo de 23/10 a 06/11/2026) e conferência contra os candles ao vivo. |
 | 0.20 | 07/11/2026 | §5.1 aprovado em 07/11/2026 (DEC-35), com os requisitos da etapa 2 da V0.2 (DEC-34): §5, pacote `features` e montagem da série de minutos; §5.1, fluxo, cálculo ao vivo e tamanho; `numpy` no grupo opcional de pesquisa; §13 atualizado. |
 | 0.21 | 07/11/2026 | §5.1: implementação da etapa 2 (somas em ordem fixa, disponibilidade dos minutos anteriores, sem aquecimento, saída do comando, testes) e MD-30 (9 meses no MacBook em 11 s, pico de 2,5 GB). |
+| 0.22 | 07/11/2026 | §5.2 aprovado em 07/11/2026 (DEC-37). §5 e §5.2: datasets da etapa 3 (DEC-36): preço de execução nos agregados (versão 2) e refação pelo job sob demanda, alvo e pontos elegíveis, construção e envio ao S3, trava do holdout com registro de acesso, custo. |
+| 0.23 | 07/11/2026 | §5.2: implementação da etapa 3 (preço de execução sem ordem, recusa da versão 1 no alvo, colunas da tabela, id e versão do código, mesmo arquivo byte a byte, manifesto, trava do holdout em duas etapas, testes). |

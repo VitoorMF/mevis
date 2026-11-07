@@ -2,10 +2,11 @@
 
 Recebe lotes do Arrow com as colunas da camada normalizada e acumula, por minuto do
 `trade_ts_us`, contagens, somas exatas em DECIMAL, o candle reconstruído (RF-171) e as faixas de
-tamanho (DEC-31). Cada lote é resumido e descartado, então a memória depende do número de
-minutos, não do de negócios (RNF-027). As somas são exatas e o candle usa os ids (abertura no
-menor, fechamento no maior), então o resultado não depende da ordem dos lotes nem das linhas
-(RF-173).
+tamanho (DEC-31) e o preço de execução (RF-221). Cada lote é resumido e descartado, então a
+memória depende do número de minutos, não do de negócios (RNF-027). As somas são exatas, o candle
+usa os ids (abertura no menor, fechamento no maior) e o preço de execução usa o menor
+(`trade_ts_us`, `trade_id`) a partir de cada instante, então o resultado não depende da ordem dos
+lotes nem das linhas (RF-173).
 """
 
 from bisect import bisect_right
@@ -19,7 +20,13 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from trader.aggregate.schema import BIN_MIN, BINS, MINUTE_TRADES, SCHEMA_VERSION
+from trader.aggregate.schema import (
+    BIN_MIN,
+    BINS,
+    EXEC_OFFSETS_MS,
+    MINUTE_TRADES,
+    TRADES_SCHEMA_VERSION,
+)
 from trader.core.timeunits import MINUTE_US
 
 COLUMNS = ("trade_id", "price", "qty", "quote_qty", "trade_ts_us", "recv_ts_us", "aggressor")
@@ -100,6 +107,8 @@ class _Minute:
     last_recv: int | None = None
     bins_count: list[int] = field(default_factory=lambda: [0] * BINS)
     bins_volume: list[Decimal] = field(default_factory=lambda: [_ZERO] * BINS)
+    executions: dict[int, tuple[int, int, Decimal]] = field(default_factory=dict)
+    """Por deslocamento (ms): `trade_ts_us`, `trade_id` e preço do 1º negócio a partir dele."""
 
 
 class TradeMinutes:
@@ -164,6 +173,33 @@ class TradeMinutes:
                 minute = self._minutes[row["minute"]]
                 minute.bins_count[row["bin"]] += row["qty_count"]
                 minute.bins_volume[row["bin"]] += row["qty_sum"]
+        self._merge_executions(work, table["trade_ts_us"])
+
+    def _merge_executions(self, work: pa.Table, trade_ts: pa.ChunkedArray) -> None:
+        """Primeiro negócio, por (`trade_ts_us`, `trade_id`), a partir de cada deslocamento."""
+        work = work.append_column("ts", trade_ts)
+        offset = pc.subtract(trade_ts, work["minute"])
+        for offset_ms in EXEC_OFFSETS_MS:
+            after = work.filter(pc.greater_equal(offset, offset_ms * 1000))
+            if after.num_rows == 0:
+                continue
+            ordered = after.sort_by(
+                [("minute", "ascending"), ("ts", "ascending"), ("trade_id", "ascending")]
+            )
+            firsts = ordered.group_by("minute", use_threads=False).aggregate(
+                [("ts", "first"), ("trade_id", "first")]
+            )
+            chosen = after.filter(pc.is_in(after["trade_id"], value_set=firsts["trade_id_first"]))
+            prices = dict(
+                zip(chosen["trade_id"].to_pylist(), chosen["price"].to_pylist(), strict=True)
+            )
+            for row in firsts.to_pylist():
+                minute = self._minutes[row["minute"]]
+                trade_id = row["trade_id_first"]
+                candidate = (row["ts_first"], trade_id, prices[trade_id])
+                current = minute.executions.get(offset_ms)
+                if current is None or candidate[:2] < current[:2]:
+                    minute.executions[offset_ms] = candidate
 
     def _merge(self, row: Mapping[str, Any], prices: Mapping[int, Decimal]) -> None:
         minute = self._minutes.get(row["minute"])
@@ -270,8 +306,12 @@ class TradeMinutes:
                 "size_bins_volume": minute.bins_volume,
                 "status": statuses.get(minute_ts, MISSING),
                 "source": source,
-                "schema_version": SCHEMA_VERSION,
+                "schema_version": TRADES_SCHEMA_VERSION,
             }
+            for offset_ms in EXEC_OFFSETS_MS:
+                execution = minute.executions.get(offset_ms)
+                values[f"exec_price_{offset_ms}ms"] = execution[2] if execution else None
+                values[f"exec_ts_{offset_ms}ms_us"] = execution[0] if execution else None
             for name, value in values.items():
                 columns[name].append(value)
         return pa.Table.from_pydict(columns, schema=MINUTE_TRADES)

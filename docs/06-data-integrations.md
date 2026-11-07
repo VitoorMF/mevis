@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.21 — rascunho |
+| Versão | 0.22 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -341,9 +341,11 @@ Entrada das features de fluxo (B6) e do livro (B7) do doc 04 §5.2. Resumem cada
 | `last_recv_ts_us` | INT64, nulo | Ao vivo: maior `recv_ts_us` entre os negócios do minuto. Arquivo: nulo |
 | `size_bins_count` | LIST<INT32> (101 itens) | Negócios por faixa de tamanho (PD-25, DEC-31) |
 | `size_bins_volume` | LIST<DECIMAL(38,8)> (101 itens) | Volume por faixa de tamanho |
+| `exec_price_2500ms`, `exec_ts_2500ms_us` | DECIMAL(18,8), INT64, nulos | Preço e horário do primeiro negócio com `trade_ts_us` a partir do início do minuto + 2,5 s: a execução de uma decisão do minuto anterior com a latência base (doc 04 §9; RF-221). Nulos sem negócio nesse trecho do minuto |
+| `exec_price_4000ms`, `exec_ts_4000ms_us` | DECIMAL(18,8), INT64, nulos | O mesmo a partir de + 4 s (latência de estresse) |
 | `status` | STRING | Abaixo |
 | `source` | `live` ou `archive` | De onde vieram os negócios |
-| `schema_version` | INT32 | 1 |
+| `schema_version` | INT32 | 2 (as colunas de execução entraram na versão 2, DEC-36) |
 
 **Faixas de tamanho (PD-25, DEC-31).** Faixa `b = floor(4 × log2(qty))`, limitada a [−68, 32], ou seja, de ~8 µBTC (abaixo do mínimo da Binance) a 256 BTC, com 4 faixas por potência de 2. Índice na lista: `b + 68`. A largura de cada faixa é de ~19%, e esse é o erro máximo do limite "percentil 95 das 24 h anteriores" de B6, calculado somando as faixas dos 1.440 minutos anteriores.
 
@@ -351,6 +353,8 @@ Entrada das features de fluxo (B6) e do livro (B7) do doc 04 §5.2. Resumem cada
 
 - **Ao vivo:** o status do canal de negócios na máscara de qualidade (§8.2).
 - **Arquivo** (sem máscara, §7): `ok` se os ids continuam do último negócio do minuto anterior com negócios até o primeiro deste, inclusive na virada do dia; `missing` em todos os minutos entre os dois negócios de um salto de id. Minuto sem negócios e sem salto fica `ok`, com contagem zero.
+
+**Preço de execução (DEC-36).** As colunas `exec_*` servem só ao alvo e ao simulador (doc 04 §4.3 e §9), nunca às features: são informação do futuro em relação à decisão. Usam o horário da corretora (`trade_ts_us`) também ao vivo. Com negócios no mesmo `trade_ts_us`, vale o de menor `trade_id`. Os agregados de versão 1 (sem essas colunas) são refeitos pelo job sob demanda; o holdout da trilha A continua sem agregar (RF-179, RF-222).
 
 **Disponibilidade (doc 04 §3.5).** O agregado do minuto só pode ser usado numa decisão em `t_d` se `last_recv_ts_us ≤ t_d` (ao vivo) ou `minute_ts_us + 60 s + L ≤ t_d` (arquivo). Um negócio do minuto recebido depois de `t_d` torna o minuto indisponível para aquela decisão, sem recortar o agregado.
 
@@ -714,3 +718,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.19 | 07/11/2026 | §13: defeito da máscara no primeiro minuto da coleta, achado ao conferir os agregados das horas ao vivo. |
 | 0.20 | 07/11/2026 | Aprovado em 07/11/2026. §8.1 e §8.2: regra de início de coleta (o primeiro minuto dos canais contínuos fica `missing`), decidida em 07/11/2026; 23/10/2026 22:44 UTC fica como exceção conhecida, descartada nos datasets. |
 | 0.21 | 07/11/2026 | §5.6: nulo de `last_recv_ts_us` vale como dado de arquivo na disponibilidade (doc 04 §5.3); §8.2 e §13: a exceção de 23/10/2026 passa à montagem da série de minutos (etapa 2, RF-203). |
+| 0.22 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-37). §5.6: preço e horário de execução por minuto em `minute_trades` (versão 2 do esquema), para o alvo e o simulador da etapa 3 (DEC-36, RF-221, RF-222). |

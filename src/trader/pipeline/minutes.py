@@ -8,6 +8,10 @@ valores ainda em DECIMAL, o status válido e o horário de disponibilidade de ca
 `trader.features.series.MINUTES`). Minuto sem dado fica nulo e inválido, sem preenchimento
 (RN-008). Os primeiros 1.500 minutos do período não têm histórico para as janelas longas: a
 montagem não lê dias antes do início, para nunca encostar no holdout sem querer.
+
+Com `execution`, a montagem também devolve o preço de execução de cada minuto (`minute_trades`
+versão 2, RF-221) numa tabela à parte, só para o alvo dos datasets: essas colunas são informação
+do futuro em relação à decisão e nunca entram na série das features (doc 03 §5.2).
 """
 
 import re
@@ -21,6 +25,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
+from trader.aggregate.schema import EXEC_OFFSETS_MS, MINUTE_TRADES
 from trader.core.holdout import refuse_holdout
 from trader.core.timeunits import MINUTE_US
 from trader.features.series import ARCHIVE_LATENCY_US, BOOK_FIELDS, MINUTES, VALID_STATUS
@@ -52,6 +57,12 @@ _TRADE_COLUMNS = [
     "status",
 ]
 _BOOK_COLUMNS = ["minute_ts_us", *BOOK_FIELDS, "status"]
+EXEC_COLUMNS = tuple(
+    name
+    for offset in EXEC_OFFSETS_MS
+    for name in (f"exec_price_{offset}ms", f"exec_ts_{offset}ms_us")
+)
+"""Preço e horário de execução por minuto (doc 06 §5.6), fora da série das features."""
 
 
 class Source(Protocol):
@@ -100,6 +111,8 @@ class Minutes:
     archive_days: dict[str, int]
     live_hours: dict[str, int]
     warnings: list[str] = field(default_factory=list)
+    execution: pa.Table | None = None
+    """Com `execution`: `minute_ts_us` e `EXEC_COLUMNS`, uma linha por minuto, como `table`."""
 
 
 def day_start_us(day: date) -> int:
@@ -114,8 +127,11 @@ def assemble_minutes(
     start: date,
     end: date,
     allow_holdout: bool = False,
+    execution: bool = False,
 ) -> Minutes:
-    """Série de minutos de `[start, end]`; recusa o holdout da trilha A sem `allow_holdout`."""
+    """Série de minutos de `[start, end]`; recusa o holdout da trilha A sem `allow_holdout`.
+
+    Com `execution`, exige `minute_trades` na versão 2 e devolve também o preço de execução."""
     if start > end:
         raise ValueError(f"início {start} depois do fim {end}")
     reserved = refuse_holdout(start, end, allow=allow_holdout, requirement="RF-204")
@@ -129,7 +145,8 @@ def assemble_minutes(
     candles = candles.rename_columns(["minute_ts_us", *_CANDLE_COLUMNS[1:], ARCHIVE])
     mask = reader.read(MASK, ["channel", "minute_ts_us", "status"], archive_allowed=False)
     mask = mask.filter(pc.equal(mask["channel"], kline_channel))
-    trades = reader.read(TRADES, _TRADE_COLUMNS, archive_allowed=True)
+    trade_columns = _TRADE_COLUMNS + list(EXEC_COLUMNS) if execution else _TRADE_COLUMNS
+    trades = reader.read(TRADES, trade_columns, archive_allowed=True)
     book = reader.read(BOOK, _BOOK_COLUMNS, archive_allowed=False)
 
     columns: dict[str, pa.Array | np.ndarray] = {"minute_ts_us": minutes}
@@ -144,6 +161,12 @@ def assemble_minutes(
                 valid[index] = False
                 columns[f"{channel}_valid"] = valid
     table = pa.table({name: columns[name] for name in MINUTES.names}, schema=MINUTES)
+    prices = None
+    if execution:
+        place = _place(trades, first_us, n, TRADES)
+        prices = pa.table(
+            {"minute_ts_us": minutes} | {name: place.take(trades[name]) for name in EXEC_COLUMNS}
+        )
     return Minutes(
         table=table,
         inputs=reader.inputs,
@@ -152,6 +175,7 @@ def assemble_minutes(
         archive_days=reader.archive_days,
         live_hours=reader.live_hours,
         warnings=reader.warnings,
+        execution=prices,
     )
 
 
@@ -190,6 +214,12 @@ class _Reader:
             for key, archive in chosen:
                 path = self.source.path(key)
                 self.inputs.append({"key": key, "sha256": file_sha256(path)})
+                absent = sorted(set(columns) - set(pq.read_schema(path).names))
+                if absent:
+                    raise ValueError(
+                        f"{key}: sem as colunas {', '.join(absent)}"
+                        " (versão antiga do esquema; refazer os agregados, RF-222)"
+                    )
                 table = pq.read_table(path, columns=columns)
                 if archive_allowed:
                     table = table.append_column(ARCHIVE, pa.array([archive] * table.num_rows))
@@ -216,6 +246,8 @@ def _empty(columns: list[str], archive_allowed: bool) -> pa.Table:
     for column in columns:
         if column in _EMPTY_TYPES:
             types[column] = _EMPTY_TYPES[column]
+        elif column in EXEC_COLUMNS:
+            types[column] = MINUTE_TRADES.field(column).type
         elif column.endswith("_ts_us") or column == "trade_count":
             types[column] = pa.int64()
         elif column in BOOK_FIELDS:

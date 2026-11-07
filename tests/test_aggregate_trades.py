@@ -167,6 +167,11 @@ def test_result_does_not_depend_on_order_or_batches() -> None:
         )
         for i in range(2_000)
     ]
+    # empates de horário com ids fora de ordem, para o preço de execução (RF-221)
+    rows += [
+        trade(10_000 - i, T0 + (i // 3) * 900_000 + 2_600_000, f"{90 + i % 7}.5")
+        for i in range(300)
+    ]
     reference = aggregate(rows).table("BTCUSDT", T0, HOUR_END, source="live", statuses={})
     shuffled = rows[:]
     rng.shuffle(shuffled)
@@ -174,6 +179,57 @@ def test_result_does_not_depend_on_order_or_batches() -> None:
     other = aggregate(*batches).table("BTCUSDT", T0, HOUR_END, source="live", statuses={})
     assert other.equals(reference)
     assert reference.schema == MINUTE_TRADES
+
+
+def test_execution_price_is_the_first_trade_from_each_offset() -> None:
+    """RF-221: primeiro negócio com `trade_ts_us` >= início do minuto + 2,5 s e + 4 s."""
+    minutes = aggregate(
+        [
+            trade(1, T0 + 2_499_999, "100"),
+            trade(2, T0 + 2_500_000, "101"),
+            trade(3, T0 + 3_999_999, "102"),
+            trade(4, T0 + 4_000_000, "103"),
+            trade(5, T0 + 50 * SECOND_US, "104"),
+            # minuto 1: só antes de 2,5 s, então sem preço de execução
+            trade(6, T0 + MINUTE_US + 2_499_999, "105"),
+            # minuto 2: entre 2,5 s e 4 s, só o preço base
+            trade(7, T0 + 2 * MINUTE_US + 3 * SECOND_US, "106"),
+            # o negócio do minuto seguinte não conta para o minuto 2
+            trade(8, T0 + 3 * MINUTE_US + 4 * SECOND_US, "107"),
+        ]
+    )
+    rows = minutes.table("BTCUSDT", T0, HOUR_END, source="live", statuses={}).to_pylist()
+
+    def execution(row: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            row["exec_price_2500ms"],
+            row["exec_ts_2500ms_us"],
+            row["exec_price_4000ms"],
+            row["exec_ts_4000ms_us"],
+        )
+
+    assert execution(rows[0]) == (Decimal(101), T0 + 2_500_000, Decimal(103), T0 + 4_000_000)
+    assert execution(rows[1]) == (None, None, None, None)
+    second = T0 + 2 * MINUTE_US + 3 * SECOND_US
+    assert execution(rows[2]) == (Decimal(106), second, None, None)
+    third = T0 + 3 * MINUTE_US + 4 * SECOND_US
+    assert execution(rows[3]) == (Decimal(107), third, Decimal(107), third)
+    assert execution(rows[4]) == (None, None, None, None)
+
+
+def test_execution_price_ties_and_batches() -> None:
+    """No mesmo `trade_ts_us`, vale o menor `trade_id`, em qualquer ordem e divisão em lotes."""
+    ts = T0 + 3 * SECOND_US
+    rows = [
+        trade(30, ts + 1, "99"),
+        trade(21, ts, "102"),
+        trade(20, ts, "101"),
+        trade(19, ts + 5, "98"),
+    ]
+    for batches in ([rows], [[row] for row in rows], [rows[::-1]], [rows[2:], rows[:2]]):
+        first = aggregate(*batches).table("BTCUSDT", T0, HOUR_END, source="live", statuses={})
+        assert first.slice(0, 1).to_pylist()[0]["exec_price_2500ms"] == Decimal(101)
+        assert first.slice(0, 1).to_pylist()[0]["exec_ts_2500ms_us"] == ts
 
 
 def test_recovered_trades_without_receive_time() -> None:
