@@ -4,8 +4,8 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 01 — PRD |
-| Versão | 0.15 — rascunho |
-| Status | Decisões até DEC-33; aguardando confirmação da conta AWS e revisão final (§19) |
+| Versão | 0.16 — rascunho |
+| Status | Decisões até DEC-35; aguardando confirmação da conta AWS e revisão final (§19) |
 | Data | 23/10/2026 |
 | Responsável pelo produto | *a preencher* |
 | Fonte | [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -569,6 +569,8 @@ O MVP é aceito quando **todos** os critérios abaixo forem atendidos, **indepen
 | DEC-31 | Agregados por minuto (etapa 1 da V0.2) | Decisões PD-24 a PD-26 (06/11/2026): histórico na instância sob demanda e horas novas no pipeline horário do host; tamanho dos negócios guardado como histograma por minuto em faixas de ~19%; holdout da trilha A agregado só na avaliação final. |
 | DEC-32 | Etapa 1 da V0.2 aprovada | Requisitos (SRS v0.8: RF-172 a RF-179, RF-187, RNF-027), arquitetura da instância de processamento sob demanda (doc 03 §7.8, ADR-14) e esquema dos agregados por minuto (doc 06 §5.6), aprovados em 06/11/2026 com o tipo c7g.2xlarge verificado. |
 | DEC-33 | Tipo da instância sob demanda | **c7i-flex.large** (2 vCPU x86, 4 GiB; 06/11/2026), no lugar do c7g.2xlarge de DEC-32: a primeira execução foi recusada porque o plano gratuito da conta só lança tipos elegíveis à camada gratuita, e o `--dry-run` não confere isso. ~US$ 0,09/h, dos créditos; o plano B (MacBook) e a migração para o plano pago foram descartados por ora (doc 03 §7.8). |
+| DEC-34 | Biblioteca de features (etapa 2 da V0.2) | Decisões PD-27 a PD-30 (07/11/2026): cálculo com `numpy`, num grupo opcional de pesquisa até a V0.3; janelas fixas de no máximo 1.500 minutos, sem médias exponenciais nem RSI de Wilder, para o lote e o ao vivo darem o mesmo valor; catálogo ajustado (desequilíbrio assinado relativo ao volume de 24 h, taxa de chegada fora de B6, janelas que faltavam); feature indefinida torna o ponto inválido, sem substituição (doc 04 §5, SRS §4.11). |
+| DEC-35 | Etapa 2 da V0.2 aprovada | Requisitos das features (SRS v0.10: RF-201 a RF-213, RNF-028, RNF-029), definições exatas das 59 features (doc 04 v1.4, §5.1 a §5.3) e arquitetura do pacote (doc 03 §5.1), aprovados em 07/11/2026. |
 
 Permanecem **em aberto**: as pendências de §17.2.
 
@@ -601,6 +603,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | PD-07 (parcial) | 26/10/2026 | DEC-27 — critérios de G2 pré-registrados no doc 04 §10.2; G3 continua em PD-07. |
 | PD-15 a PD-23 | 26/10/2026 | DEC-27 — método da V0.2 (doc 04 §1). |
 | PD-24 a PD-26 | 06/11/2026 | DEC-31 — agregados por minuto (doc 06 §5.6; doc 03 §7.8). |
+| PD-27 a PD-30 | 07/11/2026 | DEC-34 — biblioteca de features (doc 04 §5; SRS §4.11; doc 03 §5.1). |
 
 ---
 
@@ -649,6 +652,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | 0.13 | 31/10/2026 | DEC-30: G1 aprovado; limites de IS-01 e IS-02 confirmados. |
 | 0.14 | 06/11/2026 | PD-24 a PD-26 propostas e decididas no mesmo dia (DEC-31): agregados por minuto da etapa 1 da V0.2. DEC-32: etapa 1 aprovada. |
 | 0.15 | 06/11/2026 | DEC-33: instância sob demanda passa a c7i-flex.large (plano gratuito). |
+| 0.16 | 07/11/2026 | PD-27 a PD-30 apresentadas e decididas no mesmo dia (DEC-34): biblioteca de features da etapa 2 da V0.2. DEC-35: etapa 2 aprovada. |
 
 ---
 

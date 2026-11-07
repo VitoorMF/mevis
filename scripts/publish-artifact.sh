@@ -16,7 +16,8 @@ OUT="dist/artifacts/$LABEL"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 uv build --wheel --out-dir "$OUT"
-uv export --no-dev --no-emit-project --format requirements-txt --output-file "$OUT/requirements.txt" >/dev/null
+# Sem grupos: o `pesquisa` (numpy) fica fora do host até a V0.3 (RNF-029).
+uv export --no-default-groups --no-emit-project --format requirements-txt --output-file "$OUT/requirements.txt" >/dev/null
 (cd "$OUT" && shasum -a 256 ./*.whl requirements.txt > SHA256SUMS)
 
 BUCKET="$(terraform -chdir=infra/envs/prod output -raw data_bucket)"

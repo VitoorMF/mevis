@@ -1,8 +1,10 @@
 """Linha de comando: `collect`, `collector-ready`, `status`, `pipeline`, `reconcile`, `backfill`,
-`aggregates`, `quality`, `dashboard-data`, `status-publisher` e `smoke` (RF-181 a RF-187)."""
+`aggregates`, `features`, `quality`, `dashboard-data`, `status-publisher` e `smoke` (RF-181 a
+RF-187, RF-213)."""
 
 import argparse
 import asyncio
+import hashlib
 import json
 import re
 import signal
@@ -17,6 +19,7 @@ from typing import Any
 
 import httpx
 
+from trader.core.holdout import HoldoutRefused
 from trader.ingest.collector import Collector
 from trader.ingest.raw_writer import RawWriter
 from trader.ops.clock import SystemClock
@@ -32,7 +35,7 @@ from trader.ops.logs import configure_logging
 from trader.ops.metrics import Metrics, NullMetrics, StatsdMetrics
 from trader.ops.smoke import run_smoke
 from trader.ops.state import StateStore
-from trader.pipeline.aggregates import AggregatesJob, HoldoutRefused, JobOptions, job_store
+from trader.pipeline.aggregates import AggregatesJob, JobOptions, job_store
 from trader.pipeline.backfill import Backfill, BackfillBusy, BackfillReport
 from trader.pipeline.dashboard_data import export, sync_from_s3
 from trader.pipeline.hourly import HourlyPipeline, PipelineBusy
@@ -52,6 +55,7 @@ PIPELINE_COMMANDS = (
     "reconcile",
     "backfill",
     "aggregates",
+    "features",
     "quality",
     "dashboard-data",
     "status-publisher",
@@ -111,6 +115,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     aggregates.add_argument("--job-id", help="identificador do manifesto (padrão: data e hora)")
     aggregates.add_argument("--code-version", help="versão registrada no manifesto")
     aggregates.add_argument("--log-level", default="INFO")
+
+    features = commands.add_parser(
+        "features", help="features point-in-time de um período num Parquet local (RF-213)"
+    )
+    features.add_argument("--config", type=Path, help="TOML com replica_s3_bucket para ler do S3")
+    features.add_argument(
+        "--data-dir", type=Path, help="cache local (com S3) ou diretório de dados"
+    )
+    features.add_argument("--replica-dir", type=Path, help="réplica local (desenvolvimento)")
+    features.add_argument("--start", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
+    features.add_argument("--end", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
+    features.add_argument("--out", type=Path, required=True, help="arquivo Parquet de saída")
+    features.add_argument(
+        "--allow-holdout",
+        action="store_true",
+        help="só na avaliação final: permite o holdout da trilha A (RF-204)",
+    )
 
     quality = commands.add_parser(
         "quality", help="relatório de qualidade de um período (doc 06 §8.3)"
@@ -192,6 +213,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "aggregates":
         configure_logging(args.log_level)
         return run_aggregates(pipeline_config, args)
+    if args.command == "features":
+        return run_features(pipeline_config, args)
     if args.command == "quality":
         return quality_report(pipeline_config, args.start, args.end, args.json)
     if args.command == "dashboard-data":
@@ -440,6 +463,97 @@ def run_aggregates(config: PipelineConfig, args: argparse.Namespace) -> int:
     for warning in report.warnings:
         print(f"aviso: {warning}")
     print(f"manifesto: {report.manifest_key}")
+    return 0
+
+
+def run_features(config: PipelineConfig, args: argparse.Namespace) -> int:
+    """Monta a série, calcula as features e grava o Parquet (doc 03 §5.1). O `numpy` só é
+    importado aqui: o host não o tem até a V0.3 (RNF-029)."""
+    import resource
+
+    try:
+        from trader.features.compute import catalog, catalog_id, compute_features
+        from trader.features.series import series_from_table
+        from trader.pipeline.minutes import CachedS3Source, LocalSource, Source, assemble_minutes
+        from trader.storage.s3cache import S3Cache
+    except ImportError as exc:
+        print(f"falta o grupo de pesquisa (numpy): {exc}", file=sys.stderr)
+        return 2
+    import pyarrow.parquet as pq
+
+    began = time.monotonic()
+    source: Source
+    cache = None
+    if config.replica_s3_bucket:
+        import boto3  # só o pipeline e a CLI usam o SDK da AWS (ADR-03)
+
+        client = boto3.session.Session(region_name=config.aws_region).client("s3")
+        cache = S3Cache(client, config.replica_s3_bucket, config.data_dir)
+        source = CachedS3Source(cache)
+    else:
+        source = LocalSource(config.replica_dir or config.data_dir)
+    try:
+        minutes = assemble_minutes(
+            source,
+            symbol=config.symbol,
+            kline_channel=config.streams[1],
+            start=args.start,
+            end=args.end,
+            allow_holdout=args.allow_holdout,
+        )
+    except HoldoutRefused as exc:
+        print(f"recusado: {exc}", file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    finally:
+        if cache is not None:
+            cache.save()
+    assembled = time.monotonic()
+    series = series_from_table(minutes.table)
+    del minutes.table
+    frame = compute_features(series)
+    del series
+    computed = time.monotonic()
+    table = frame.to_table()
+    inputs = sorted(minutes.inputs, key=lambda i: i["key"])
+    digest = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
+    metadata = {
+        "catalog_id": catalog_id(),
+        "catalog": catalog(),
+        "code_version": version("trader"),
+        "start": args.start.isoformat(),
+        "end": args.end.isoformat(),
+        "allow_holdout": minutes.allow_holdout,
+        "holdout_days": minutes.holdout_days,
+        "inputs": len(inputs),
+        "inputs_sha256": digest,
+    }
+    table = table.replace_schema_metadata({"mevis.features": json.dumps(metadata)})
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(table, args.out, compression="zstd")
+    rows = table.num_rows
+    peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (
+        1 << 20 if sys.platform == "darwin" else 1 << 10
+    )
+    if cache is not None:
+        print(f"S3: {cache.downloaded} arquivo(s) baixado(s), {cache.unchanged} sem mudança")
+    print(
+        f"minutos: {rows} · dias de arquivo: {minutes.archive_days}"
+        f" · horas ao vivo: {minutes.live_hours}"
+    )
+    for family, valid in frame.valid.items():
+        print(f"  pontos válidos em {family}: {int(valid.sum())} ({valid.mean():.1%})")
+    print(
+        f"montagem: {assembled - began:.1f} s · cálculo: {computed - assembled:.1f} s"
+        f" · pico de memória: {peak_mb:.0f} MB"
+    )
+    for warning in minutes.warnings:
+        print(f"aviso: {warning}")
+    if minutes.holdout_days:
+        print(f"inclui {minutes.holdout_days} dia(s) do holdout (avaliação final)")
+    print(f"catálogo {metadata['catalog_id']} → {args.out}")
     return 0
 
 

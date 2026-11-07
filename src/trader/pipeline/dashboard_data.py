@@ -10,7 +10,6 @@ import os
 import re
 import sqlite3
 from collections import defaultdict
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -20,6 +19,8 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import zstandard
+
+from trader.storage.s3cache import S3Cache, list_objects
 
 MINUTE_US = 60_000_000
 HOUR_US = 3_600_000_000
@@ -67,13 +68,8 @@ def sync_from_s3(
     client: Any, bucket: str, data_dir: Path, symbol: str, today: date | None = None
 ) -> SyncReport:
     """Baixa para `data_dir` o que mudou no S3 desde a última vez (pelo ETag de cada objeto)."""
-    manifest_path = data_dir / ".s3-etags.json"
-    try:
-        manifest: dict[str, str] = json.loads(manifest_path.read_text())
-    except (OSError, ValueError):
-        manifest = {}
-    report = SyncReport()
-    _download(client, bucket, data_dir, STATE_BACKUP, None, manifest, report)
+    cache = S3Cache(client, bucket, data_dir)
+    cache.get(STATE_BACKUP)
     start = collection_start(data_dir / STATE_BACKUP)
     if start is not None:
         last = today or datetime.now(UTC).date()
@@ -81,16 +77,16 @@ def sync_from_s3(
         for dataset in SYNCED:
             for day in _days(first, last):
                 prefix = f"{dataset}/symbol={symbol}/date={day:%Y-%m-%d}/"
-                for obj in _list(client, bucket, prefix):
+                for obj in cache.list(prefix):
                     if _HOURLY.search(obj["Key"]):
-                        _download(client, bucket, data_dir, obj["Key"], obj, manifest, report)
-    for obj in _list(client, bucket, "derived/ops/"):
+                        cache.get(obj["Key"], obj)
+    for obj in cache.list("derived/ops/"):
         if _BACKFILL_OPS.match(obj["Key"]):
-            _download(client, bucket, data_dir, obj["Key"], obj, manifest, report)
-    data_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(json.dumps(manifest, indent=1, sort_keys=True))
+            cache.get(obj["Key"], obj)
+    cache.save()
+    report = SyncReport(downloaded=cache.downloaded, unchanged=cache.unchanged)
     _count_raw_in_s3(client, bucket, data_dir, symbol, report)
-    objects = list(_list(client, bucket, ""))
+    objects = list(list_objects(client, bucket, ""))
     totals = {"objects": len(objects), "bytes": sum(int(o.get("Size", 0)) for o in objects)}
     (data_dir / BUCKET_TOTALS).write_text(json.dumps(totals))
     return report
@@ -105,7 +101,7 @@ def _count_raw_in_s3(
         counts: dict[str, dict[str, Any]] = json.loads(path.read_text())
     except (OSError, ValueError):
         counts = {}
-    for obj in _list(client, bucket, f"raw/binance-spot/{symbol.lower()}/"):
+    for obj in list_objects(client, bucket, f"raw/binance-spot/{symbol.lower()}/"):
         key = obj["Key"]
         match = _RAW_KEY.match(key)
         if match is None or counts.get(key, {}).get("etag") == obj["ETag"]:
@@ -123,34 +119,6 @@ def _count_raw_in_s3(
         }
         report.raw_counted += 1
     path.write_text(json.dumps(counts, indent=1, sort_keys=True))
-
-
-def _list(client: Any, bucket: str, prefix: str) -> Iterator[dict[str, Any]]:
-    for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
-        yield from page.get("Contents", [])
-
-
-def _download(
-    client: Any,
-    bucket: str,
-    data_dir: Path,
-    key: str,
-    listed: dict[str, Any] | None,
-    manifest: dict[str, str],
-    report: SyncReport,
-) -> None:
-    if listed is None:
-        listed = {"ETag": client.head_object(Bucket=bucket, Key=key)["ETag"]}
-    target = data_dir / key
-    if manifest.get(key) == listed["ETag"] and target.exists():
-        report.unchanged += 1
-        return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_name(target.name + ".tmp")
-    client.download_file(bucket, key, str(tmp))
-    os.replace(tmp, target)
-    manifest[key] = listed["ETag"]
-    report.downloaded += 1
 
 
 # ------------------------------------------------------------------ agregação

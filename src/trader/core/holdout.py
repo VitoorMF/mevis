@@ -19,3 +19,20 @@ def holdout_days(start: date, end: date) -> list[date]:
 
 def in_holdout(day: date) -> bool:
     return HOLDOUT_A[0] <= day <= HOLDOUT_A[1]
+
+
+class HoldoutRefused(ValueError):
+    """O período pedido inclui o holdout da trilha A sem a opção da avaliação final (RF-179)."""
+
+
+def refuse_holdout(start: date, end: date, *, allow: bool, requirement: str) -> list[date]:
+    """Levanta `HoldoutRefused` se `[start, end]` toca o holdout sem `allow`; devolve os dias."""
+    reserved = holdout_days(start, end)
+    if reserved and not allow:
+        first, last = HOLDOUT_A
+        raise HoldoutRefused(
+            f"o período inclui {len(reserved)} dia(s) do holdout da trilha A"
+            f" ({first:%d/%m/%Y} a {last:%d/%m/%Y}); só com a opção da avaliação final"
+            f" (doc 04 §3.3; {requirement})"
+        )
+    return reserved

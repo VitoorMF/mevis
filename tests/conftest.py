@@ -2,10 +2,12 @@
 
 import asyncio
 import contextlib
+import hashlib
+import io
 import json
 import time
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Self
@@ -269,3 +271,41 @@ async def collect_while(
             stop.set()
             await asyncio.wait_for(run.task, 10)
     return run
+
+
+class FakeS3:
+    """S3 em memória: listagem com ETag, download e leitura."""
+
+    def __init__(self, objects: dict[str, bytes]) -> None:
+        self.objects = objects
+        self.downloads: list[str] = []
+        self.reads: list[str] = []
+
+    def _etag(self, key: str) -> str:
+        return '"' + hashlib.md5(self.objects[key]).hexdigest() + '"'
+
+    def head_object(self, Bucket: str, Key: str) -> dict[str, Any]:
+        return {"ETag": self._etag(Key)}
+
+    def get_paginator(self, name: str) -> Any:
+        fake = self
+
+        class Paginator:
+            def paginate(self, Bucket: str, Prefix: str) -> Iterator[dict[str, Any]]:
+                keys = sorted(k for k in fake.objects if k.startswith(Prefix))
+                yield {
+                    "Contents": [
+                        {"Key": k, "ETag": fake._etag(k), "Size": len(fake.objects[k])}
+                        for k in keys
+                    ]
+                }
+
+        return Paginator()
+
+    def download_file(self, bucket: str, key: str, path: str) -> None:
+        Path(path).write_bytes(self.objects[key])
+        self.downloads.append(key)
+
+    def get_object(self, Bucket: str, Key: str) -> dict[str, Any]:
+        self.reads.append(Key)
+        return {"Body": io.BytesIO(self.objects[Key])}

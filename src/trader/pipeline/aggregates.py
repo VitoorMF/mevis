@@ -39,7 +39,7 @@ from trader.aggregate.trades import (
     boundary_span,
     mark_missing,
 )
-from trader.core.holdout import HOLDOUT_A, holdout_days, in_holdout
+from trader.core.holdout import in_holdout, refuse_holdout
 from trader.core.timeunits import MINUTE_US
 from trader.ops.config import PipelineConfig
 from trader.ops.logs import ctx
@@ -60,10 +60,6 @@ DAY_US = 86_400_000_000
 TRADE_BATCH_ROWS = 100_000
 JOBS_PREFIX = "derived/ops/jobs"
 _EPOCH = date(1970, 1, 1)
-
-
-class HoldoutRefused(ValueError):
-    """O período pedido inclui o holdout da trilha A sem a opção da avaliação final (RF-179)."""
 
 
 def write_table(path: Path, table: pa.Table) -> None:
@@ -326,14 +322,9 @@ class AggregatesJob:
         options = self._options
         if options.start > options.end:
             raise ValueError(f"início {options.start} depois do fim {options.end}")
-        reserved = holdout_days(options.start, options.end)
-        if reserved and not options.allow_holdout:
-            first, last = HOLDOUT_A
-            raise HoldoutRefused(
-                f"o período inclui {len(reserved)} dia(s) do holdout da trilha A"
-                f" ({first:%d/%m/%Y} a {last:%d/%m/%Y}); só com a opção da avaliação final"
-                " (doc 04 §3.3; RF-179)"
-            )
+        reserved = refuse_holdout(
+            options.start, options.end, allow=options.allow_holdout, requirement="RF-179"
+        )
         started = self._clock()
         manifest: dict[str, Any] = {
             "job_id": options.job_id,

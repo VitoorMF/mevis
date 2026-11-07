@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.20 — rascunho |
+| Versão | 0.21 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -383,7 +383,7 @@ As medidas do livro são razões e já ficam em FLOAT64; é a única exceção �
 **Implementação (06/11/2026).** Pacote `trader/aggregate` (sem E/S), chamado pelo pipeline horário para cada hora normalizada e pelo comando `trader aggregates` para períodos (doc 03 §7.8). Detalhes que o texto acima não fixava:
 
 - **Arquivo:** os minutos dos dois negócios de um salto de id também ficam `missing`, porque os ids ausentes podem estar em qualquer um deles; um minuto com id ausente entre os seus próprios negócios também. Na virada do dia, o job confere o último negócio de um dia com o primeiro do seguinte; um vizinho fora do período ou no holdout fica registrado como aviso no manifesto.
-- **`last_recv_ts_us`:** negócios recuperados do arquivo (§9.1) não têm `recv_ts_us` e ficam fora do máximo; a coluna é nula num minuto sem negócios ou só com recuperados. Como tratar esse nulo na disponibilidade fica para a biblioteca de features (etapa 2).
+- **`last_recv_ts_us`:** negócios recuperados do arquivo (§9.1) não têm `recv_ts_us` e ficam fora do máximo; a coluna é nula num minuto sem negócios ou só com recuperados. Na disponibilidade, o nulo vale como dado de arquivo: o minuto está disponível no seu fim + L (doc 04 §5.3).
 - **`snapshot_count`:** conta todos os snapshots do minuto, inclusive os cruzados, que ficam fora das medidas.
 - **`symbol`:** as duas tabelas têm a coluna, como as camadas normalizadas.
 - **Faixa de tamanho:** calculada com limites inteiros exatos (`n⁴ ≥ 2^b × 10³²`, em unidades de 10⁻⁸ BTC), não com o logaritmo de cada máquina.
@@ -505,7 +505,7 @@ Se mais de um estado se aplica ao minuto, prevalece o pior. A pesquisa (V0.2) e 
 
 **Início e fim de uma coleta (decisão de 07/11/2026):** o minuto em que uma coleta começa sem sessão anterior é parcial nos canais contínuos (negócios, top 20 e diferencial) e fica `missing` pela regra de início de coleta (§8.1). O candle de 1 min não precisa da regra, porque chega fechado e completo. No fim de uma sessão, a seguinte registra a lacuna desde o último registro, e os minutos parciais das duas pontas deixam de ser `ok`; só uma parada definitiva deixaria o último minuto parcial sem marca.
 
-**Exceção conhecida:** a regra vale para as coletas iniciadas depois da implementação. O minuto 23/10/2026 22:44 UTC, início da coleta contínua (coletor às 22:44:11), continua `ok` nos três canais contínuos, tanto na máscara quanto nos agregados por minuto (§5.6), embora seja parcial: 170 de 301 negócios, conferido contra o candle ao vivo em 07/11/2026. O minuto não é regerado: a hora já foi conferida e o bruto saiu do disco do host pela retenção local; refazê-la exigiria trazer o bruto de volta da réplica (`trader reconcile`, §9.2) e forçar uma nova conferência dessa hora, para um único minuto. Quem montar datasets (etapa 3 da V0.2) descarta esse minuto.
+**Exceção conhecida:** a regra vale para as coletas iniciadas depois da implementação. O minuto 23/10/2026 22:44 UTC, início da coleta contínua (coletor às 22:44:11), continua `ok` nos três canais contínuos, tanto na máscara quanto nos agregados por minuto (§5.6), embora seja parcial: 170 de 301 negócios, conferido contra o candle ao vivo em 07/11/2026. O minuto não é regerado: a hora já foi conferida e o bruto saiu do disco do host pela retenção local; refazê-la exigiria trazer o bruto de volta da réplica (`trader reconcile`, §9.2) e forçar uma nova conferência dessa hora, para um único minuto. A montagem da série de minutos das features (etapa 2 da V0.2, RF-203) marca esse minuto como inválido nos negócios e no livro.
 
 ### 8.3 Relatório de qualidade (RF-158, CA-05)
 
@@ -665,7 +665,7 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | Tamanho real da camada normalizada | V0.1 |
 | Máscara de qualidade para os dias importados pelo backfill (§7) | V0.2, se a pesquisa precisar |
 | Publicar no host a versão com a regra de início de coleta (§8.1, §8.2), implementada em 07/11/2026 | Próxima implantação |
-| Descartar o minuto 23/10/2026 22:44 UTC dos canais contínuos (exceção de §8.2) | Etapa 3 da V0.2 (datasets) |
+| Descartar o minuto 23/10/2026 22:44 UTC dos canais contínuos (exceção de §8.2) | Etapa 2 da V0.2: montagem da série de minutos (RF-203) |
 | Peso exato de `exchangeInfo` | Implementação |
 | Termos de uso (§12) | Antes da coleta contínua |
 | Classes de armazenamento mais baratas no S3 | CP-3 (doc 03 §10.4) |
@@ -713,3 +713,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.18 | 06/11/2026 | §5.6: implementação, detalhes de interpretação e MD-29 (validação contra os candles e medição do pior dia). |
 | 0.19 | 07/11/2026 | §13: defeito da máscara no primeiro minuto da coleta, achado ao conferir os agregados das horas ao vivo. |
 | 0.20 | 07/11/2026 | Aprovado em 07/11/2026. §8.1 e §8.2: regra de início de coleta (o primeiro minuto dos canais contínuos fica `missing`), decidida em 07/11/2026; 23/10/2026 22:44 UTC fica como exceção conhecida, descartada nos datasets. |
+| 0.21 | 07/11/2026 | §5.6: nulo de `last_recv_ts_us` vale como dado de arquivo na disponibilidade (doc 04 §5.3); §8.2 e §13: a exceção de 23/10/2026 passa à montagem da série de minutos (etapa 2, RF-203). |

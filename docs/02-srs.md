@@ -4,8 +4,8 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 02 — SRS |
-| Versão | 0.9 — rascunho |
-| Escopo desta versão | **V0.1 (Data Engine) detalhada**, mais os agregados por minuto da etapa 1 da V0.2 (§4.8). O resto da V0.2 e a V0.3 apenas delimitados (§9). |
+| Versão | 0.10 — rascunho |
+| Escopo desta versão | **V0.1 (Data Engine) detalhada**, mais os agregados por minuto da etapa 1 da V0.2 (§4.8) e as features da etapa 2 (§4.11). O resto da V0.2 e a V0.3 apenas delimitados (§9). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.6; [03 — Architecture](03-architecture.md) v0.2; [06 — Data & Integrations](06-data-integrations.md) v0.2; [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -180,7 +180,7 @@ Entidades e atributos mínimos. Tipos físicos, formatos de arquivo e particiona
 
 ---
 
-## 4. Requisitos funcionais — V0.1
+## 4. Requisitos funcionais — V0.1 e etapas detalhadas da V0.2
 
 ### 4.1 Coleta (F-01, F-02, F-03)
 
@@ -313,6 +313,26 @@ Entidades e atributos mínimos. Tipos físicos, formatos de arquivo e particiona
 | RF-193 | O sistema deve obter snapshots REST completos do livro (5000 níveis por lado) no início de cada sessão, periodicamente [PROPOSTA: a cada 15 min] e após cada quebra de continuidade do diferencial, gravando-os na camada bruta. | Must | F-03, F-04, DEC-18 | T |
 | RF-194 | O sistema deve verificar a continuidade do diferencial (`U` igual ao `u` anterior + 1) e registrar cada quebra como lacuna do diferencial. | Must | F-09, DEC-18 | T |
 
+### 4.11 Features point-in-time (F-12) — V0.2, etapa 2
+
+Catálogo, definições exatas, minuto válido, disponibilidade e ponto válido estão no doc 04 §5 (v1.4, DEC-34). Aqui ficam os comportamentos que o código precisa ter.
+
+| ID | Requisito | Prior. | Origem | Verif. |
+|---|---|---|---|---|
+| RF-201 | O sistema deve calcular, para cada minuto t de uma série, as features do catálogo do doc 04 §5.2 pelas definições do doc 04 §5.3, no instante de decisão t_d = fim do minuto t + 2 s (doc 04 §4.1). | Must | F-12, doc 04 §5 | T |
+| RF-202 | O cálculo deve receber uma série contínua de minutos UTC com, por minuto e canal, os valores (candle, `minute_trades`, `minute_book`), o status e o horário de disponibilidade, e não saber se ela veio do arquivo, da coleta ao vivo ou, na V0.3, da operação. O mesmo código serve aos três casos. | Must | F-12, PP-05 | T, I |
+| RF-203 | O sistema deve montar a série de minutos de um período a partir da camada normalizada e dos agregados (doc 06 §5.6), lidos de um diretório local ou do S3 com cache local: candles de arquivo ou ao vivo, `minute_trades`, `minute_book` e a máscara. Todo minuto do período tem uma linha; minuto sem dado fica inválido, sem preenchimento (RN-008). O minuto 23/10/2026 22:44 UTC fica inválido nos negócios e no livro (exceção do doc 06 §8.2). | Must | F-12, RN-008 | T |
+| RF-204 | A montagem deve recusar dias do holdout da trilha A, salvo com a opção explícita da avaliação final, registrada na saída (doc 04 §3.3; mesma regra de RF-179). | Must | IS-12 | T |
+| RF-205 | Um minuto só entra no cálculo em t_d se estiver disponível até t_d (doc 04 §3.5 e §5.3): ao vivo, pelo recebimento do candle fechado e do último negócio do minuto; sem horário de recebimento (arquivo ou recuperado), no fim do minuto + L. Minuto indisponível conta como inválido. | Must | PP-04, RN-006 | T |
+| RF-206 | Toda feature deve depender só dos últimos 1.500 minutos até t, com janelas fixas, sem médias exponenciais nem RSI de Wilder (DEC-34). Calcular sobre a série inteira ou só sobre os últimos 1.500 minutos deve dar o mesmo valor em t, com diferença relativa de no máximo 10⁻⁹: é a paridade entre pesquisa e operação. | Must | PP-05, DEC-34 | T |
+| RF-207 | Para cada minuto, o sistema deve indicar se o ponto é válido em cada família (candles, volume, fluxo, livro), pelas regras do doc 04 §3.4 e §5.3: minutos das janelas de até 60 min todos válidos; janelas de 240 e 1.440 min calculadas só com os minutos válidos e com pelo menos 95% deles. | Must | doc 04 §3.4, RN-005 | T |
+| RF-208 | Uma feature indefinida (divisão por zero, minuto do livro sem medidas) deve ficar nula e deixar o ponto inválido na família, sem substituição do valor (DEC-34). | Must | RN-008, DEC-34 | T |
+| RF-209 | A saída deve ter uma linha por minuto, com o início do minuto, t_d, uma coluna FLOAT64 por feature, de nome estável, e uma coluna de validade por família, além de uma identificação do catálogo (nomes, parâmetros e versão do código) para o manifesto dos datasets (doc 04 §11). | Must | F-12, F-13 | T, I |
+| RF-210 | Cada feature deve ter um teste automatizado de point-in-time: alterar qualquer dado posterior a t_d, inclusive os horários de recebimento, não muda o valor nem a validade da feature em t_d. | Must | IS-11, CA-08 | T |
+| RF-211 | O cálculo deve ser determinístico: as mesmas entradas e a mesma versão do código geram o mesmo conteúdo. | Must | CA-07 | T |
+| RF-212 | Os decimais das entradas (doc 06 §5.3) devem virar FLOAT64 só na entrada do cálculo; a montagem e as camadas anteriores continuam em DECIMAL. | Must | doc 04 §5.1 | T, I |
+| RF-213 | O sistema deveria oferecer o comando `trader features --start --end --out <arquivo>`, que monta a série e grava num Parquet local as features de um período do desenvolvimento, para inspeção e conferência. | Should | F-12 | D |
+
 ---
 
 ## 5. Requisitos não funcionais
@@ -346,6 +366,8 @@ Entidades e atributos mínimos. Tipos físicos, formatos de arquivo e particiona
 | RNF-025 | Custo | Métricas personalizadas, alarmes e volume de logs devem ser dimensionados para a camada gratuita sempre que possível; cada métrica e alarme acima dela precisa de justificativa de custo. | RS-09 | I, A |
 | RNF-027 | Desempenho | A agregação deve processar um dia de negócios com memória limitada (em blocos), sem carregar o dia inteiro: até 2 GiB por processo no pior dia medido (15,4 milhões de negócios, MD-27). | PD-23 | T, A |
 | RNF-026 | Conformidade | O sistema deve respeitar os limites e os termos de uso da Binance. | RS-03, RN-015 | I |
+| RNF-028 | Desempenho | Montar a série e calcular as features de 9 meses de minutos (~393 mil) no MacBook em até 10 min, com até 4 GiB de memória no processo [PROPOSTA]. | doc 04 §12 | T, A |
+| RNF-029 | Dependências | O cálculo das features usa `numpy` (DEC-34), num grupo opcional de pesquisa, fora do artefato do host até a V0.3 precisar das features ao vivo; o grupo precisa ter pacotes para macOS ARM64 e Linux ARM64 e x86_64 (RNF-022). | DEC-34, RNF-022 | I |
 
 ---
 
@@ -493,7 +515,7 @@ Estes requisitos serão escritos em versão futura do SRS, depois dos documentos
 
 | Versão | Grupo | Funcionalidades | Faixa de ids | Depende de |
 |---|---|---|---|---|
-| V0.2 | Features point-in-time | F-12 | RF-201–RF-219 | Doc 04 (features, horizontes, latência assumida) |
+| V0.2 | Features point-in-time | F-12 | RF-201–RF-219 | **Detalhado em §4.11** (RF-201 a RF-213, v0.10) |
 | V0.2 | Datasets versionados | F-13 | RF-221–RF-229 | Doc 04, doc 06 |
 | V0.2 | Baselines, treinamento e validação | F-14, F-15, F-16 | RF-231–RF-249 | Doc 04 (targets, walk-forward, holdout) |
 | V0.2 | Backtester com custos | F-17 | RF-251–RF-269 | Docs 04 e 05 (custos, modelo de preenchimento) |
@@ -507,7 +529,7 @@ Requisitos da V0.1 que já servem às versões seguintes: replay (RF-134) para a
 
 ---
 
-## 10. Rastreabilidade (V0.1)
+## 10. Rastreabilidade (V0.1 e etapas detalhadas da V0.2)
 
 | Funcionalidade (PRD) | Requisitos | Casos de uso | Aceitação |
 |---|---|---|---|
@@ -522,6 +544,7 @@ Requisitos da V0.1 que já servem às versões seguintes: replay (RF-134) para a
 | F-09 Qualidade | RF-151–RF-160, RF-194 | UC-06 | CA-05 |
 | F-10 Monitoramento | RF-161–RF-166; RNF-018 | UC-07, UC-08 | CA-01 |
 | F-11 Agregações | RF-171–RF-179, RNF-027 | — | IS-03 |
+| F-12 Features (V0.2) | RF-201–RF-213; RNF-028, RNF-029 | — | IS-11, CA-08 |
 | Transversal: operação | RF-181–RF-187 | UC-01, UC-07 | — |
 | Transversal: segurança e custo | RN-001, RN-012, RN-015; RNF-013–RNF-017, RNF-023–RNF-025 | — | — |
 
@@ -569,3 +592,4 @@ Nenhuma pendência aberta que afete a V0.1. Resolvidas em 23/10/2026: PD-06 → 
 | 0.7 | 31/10/2026 | Aprovado em 31/10/2026. Depois de buracos não registrados nas trocas de versão (doc 06 MD-28): RF-160 (continuidade conferida pelo pipeline, entre sessões), RF-186 (prontidão real na troca), RF-158 falha sem o registro de lacunas e sessões; CA-01 inclui a conferência. |
 | 0.8 | 06/11/2026 | Aprovado em 06/11/2026 (DEC-32). Etapa 1 da V0.2: RF-172 e RF-173 passam a Must; RF-174 a RF-179 (agregados por minuto), RF-187 (processamento sob demanda) e RNF-027. |
 | 0.9 | 07/11/2026 | Aprovado em 07/11/2026. RF-160: o início de uma coleta sem sessão anterior também é conferido (doc 06 §8.1). |
+| 0.10 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-35). Etapa 2 da V0.2 (DEC-34): §4.11 com RF-201 a RF-213 (features point-in-time), RNF-028 e RNF-029; §9 e §10 atualizados. |

@@ -11,11 +11,11 @@ import pyarrow.parquet as pq
 import pytest
 
 from trader.cli.main import main
+from trader.core.holdout import HoldoutRefused
 from trader.core.timeunits import MINUTE_US
 from trader.ops.config import PipelineConfig
 from trader.pipeline.aggregates import (
     AggregatesJob,
-    HoldoutRefused,
     InPlaceStore,
     JobOptions,
     day_start_us,

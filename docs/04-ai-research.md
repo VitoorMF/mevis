@@ -4,9 +4,9 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 04 — AI & Quantitative Research |
-| Versão | 1.3 — aprovado |
+| Versão | 1.4 — aprovado |
 | Escopo desta versão | Método de pesquisa da V0.2: dados e períodos, formulação do problema, features, baselines, modelos, validação, custos, métricas, critérios de G2 a pré-registrar, registro de experimentos e plano de trabalho. |
-| Status | Aprovado em 26/10/2026 (DEC-28). Decisões PD-15 a PD-23 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
+| Status | Aprovado em 26/10/2026 (DEC-28); v1.4 aprovada em 07/11/2026 (DEC-35). Decisões PD-15 a PD-23 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
 | Data | 26/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.8; [02 — SRS](02-srs.md) v0.5; [03 — Architecture](03-architecture.md) v0.8; [06 — Data & Integrations](06-data-integrations.md) v0.8 |
 
@@ -161,6 +161,8 @@ Motivo: com custo de ~0,22% por operação completa (§9), o preço precisa anda
 3. Cada feature tem um teste automatizado de point-in-time (IS-11, CA-08): alterar qualquer dado posterior a t_d não pode mudar o valor da feature em t_d.
 4. Minuto inválido numa janela de até 60 min, ou mais de 5% de minutos inválidos numa janela longa (§3.4), torna o ponto inválido; não há preenchimento.
 5. Conversão para ponto flutuante só a partir daqui (doc 06 §5.3).
+6. **Janelas fixas [DECISÃO] DEC-34:** toda feature usa no máximo os últimos 1.500 minutos (24 h mais a maior janela); não há médias exponenciais nem RSI de Wilder, cujo valor depende de todo o histórico desde o início da série. Assim, o cálculo em lote da pesquisa e o cálculo ao vivo sobre os últimos 1.500 minutos dão o mesmo valor.
+7. **Valor indefinido [DECISÃO] DEC-34:** uma feature indefinida com dados válidos (divisão por zero, minuto do livro sem medidas) torna o ponto inválido na família, como um minuto inválido; o valor não é substituído. A regressão logística e o XGBoost veem os mesmos pontos.
 
 ### 5.2 Catálogo inicial [DECISÃO]
 
@@ -170,12 +172,79 @@ As famílias são cumulativas, seguindo a escada de §2. Valores de janela em mi
 |---|---|---|
 | Candles (B4) | Retornos logarítmicos em 1, 5, 15, 60 e 240; volatilidade realizada em 15 e 60; amplitude (máxima − mínima) relativa em 1 e 15; distância às médias móveis de 15, 60 e 240; RSI de 14; posição do fechamento na amplitude dos últimos 60; hora do dia e dia da semana (UTC) | Candles de 1 min |
 | Volume (B5) | Volume em 1, 5, 15 e 60 relativo à média das últimas 24 h; número de negócios em 1 e 15 relativo à média de 24 h; retorno ponderado por volume em 15 | Candles (volume, `trade_count`) |
-| Fluxo de negócios (B6) | Fração do volume com agressor comprador em 1, 5, 15 e 60; desequilíbrio de volume assinado (compra − venda) normalizado; fração do volume em negócios grandes (acima do percentil 95 de tamanho das 24 h anteriores); distância ao VWAP de 15 e 60; taxa de chegada de negócios no último minuto | Negócios |
-| Livro de ofertas (B7) | Spread relativo; desequilíbrio do 1º nível (qtd. compra / (compra + venda)); desequilíbrio acumulado em 5, 10 e 20 níveis; distância do microprice ao preço médio; média, mínimo e último valor dessas medidas no último minuto; variação do desequilíbrio em 1 e 5 | Snapshots top 20 |
+| Fluxo de negócios (B6) | Fração do volume com agressor comprador em 1, 5, 15 e 60; desequilíbrio de volume assinado (compra − venda) em 1, 5, 15 e 60, relativo ao volume médio das últimas 24 h; fração do volume em negócios grandes (acima do percentil 95 de tamanho das 24 h anteriores) em 15 e 60; distância ao VWAP de 15 e 60 | Negócios |
+| Livro de ofertas (B7) | Spread relativo; desequilíbrio do 1º nível (qtd. compra / (compra + venda)); desequilíbrio acumulado em 5, 10 e 20 níveis; distância do microprice ao preço médio; média, mínimo e último valor dessas medidas no último minuto; variação dos desequilíbrios de 1 e de 20 níveis em 1 e 5 | Snapshots top 20 |
 
 Decisão de fronteira: o volume com agressor comprador (`taker_buy_volume`) também aparece nos candles, mas pertence ao **fluxo de negócios** (B6). B5 usa só volume total e contagem, para que o ganho de B6 meça a informação de direção da agressão.
 
 Mudanças no catálogo durante o desenvolvimento são permitidas e registradas (§11); depois do congelamento de uma trilha, não.
+
+**Ajustes de 07/11/2026 [DECISÃO] DEC-34**, antes da implementação:
+
+- O desequilíbrio assinado normalizado pelo volume do próprio período seria a fração compradora reescrita (`(B − S) / (B + S) = 2·B/(B + S) − 1`). Passou a ser dividido pelo volume médio de 24 h, e assim mede a intensidade da agressão, não a proporção.
+- A taxa de chegada de negócios no último minuto saiu de B6: repetia a contagem de B5 e misturaria atividade com direção na ablação de B6.
+- Janelas que o catálogo não fixava: 1, 5, 15 e 60 no desequilíbrio assinado; 15 e 60 nos negócios grandes; a variação do livro mede os desequilíbrios de 1 e de 20 níveis.
+
+### 5.3 Definições exatas [DECISÃO] DEC-34
+
+**Notação.** t é o último minuto fechado no instante da decisão t_d = fim de t + 2 s (§4.1), e J_w são os w minutos de t − w + 1 a t. Dos candles: c, h, l, v e n (fechamento, máxima, mínima, volume e número de negócios). De `minute_trades` (doc 06 §5.6): V e B (volume total e com agressor comprador), S = V − B, Q (volume em USDT), C (fechamento), K[k] e U[k] (contagem e volume na faixa de tamanho k). r_i = ln(c_i / c_{i−1}). As médias de 24 h (v̄, n̄ e V̄) são médias por minuto nos minutos válidos de J_1440.
+
+**Candles (B4)**, canal de candles:
+
+| Feature | Definição | Minutos usados |
+|---|---|---|
+| `ret_w`, w ∈ {1, 5, 15, 60, 240} | ln(c_t / c_{t−w}) | t − w e t |
+| `rvol_w`, w ∈ {15, 60} | √(Σ r_i², i ∈ J_w), sem anualizar | t − w a t |
+| `range_w`, w ∈ {1, 15} | (máx. de h − mín. de l em J_w) / c_t | J_w |
+| `sma_dist_w`, w ∈ {15, 60, 240} | c_t / média de c em J_w − 1 | J_w |
+| `rsi_14` | 100 · G / (G + P), com G e P as somas das altas e das baixas de c_i − c_{i−1} em J_14 (médias simples) | t − 14 a t |
+| `range_pos_60` | (c_t − mín. de l) / (máx. de h − mín. de l), em J_60 | J_60 |
+| `hour_sin`, `hour_cos` | seno e cosseno de 2π · h / 24, com h a hora UTC do fim de t em fração (14h30 → 14,5) | — |
+| `dow_sin`, `dow_cos` | seno e cosseno de 2π · d / 7, com d o dia da semana UTC do fim de t (segunda = 0) | — |
+
+Hora e dia viram seno e cosseno porque a regressão logística trataria um número inteiro como linear (23 h longe de 0 h); o XGBoost não perde nada com isso.
+
+**Volume (B5)**, canal de candles:
+
+| Feature | Definição | Minutos usados |
+|---|---|---|
+| `vol_rel_w`, w ∈ {1, 5, 15, 60} | Σ v em J_w / (w · v̄) | J_w e J_1440 |
+| `count_rel_w`, w ∈ {1, 15} | Σ n em J_w / (w · n̄) | J_w e J_1440 |
+| `vwret_15` | Σ v_i · r_i / Σ v_i, i ∈ J_15 | t − 15 a t |
+
+**Fluxo de negócios (B6)**, canal de negócios:
+
+| Feature | Definição | Minutos usados |
+|---|---|---|
+| `buy_frac_w`, w ∈ {1, 5, 15, 60} | Σ B / Σ V, em J_w | J_w |
+| `signed_vol_w`, w ∈ {1, 5, 15, 60} | Σ (B − S) em J_w / (w · V̄) | J_w e J_1440 |
+| `large_frac_w`, w ∈ {15, 60} | Σ U[k] das faixas k > k* / Σ V, em J_w; k* é a faixa que contém o percentil 95 do tamanho dos negócios, pela contagem K somada nos 1.440 minutos anteriores a J_w (a menor faixa em que a contagem acumulada chega a 95%) | J_w e os 1.440 minutos anteriores |
+| `vwap_dist_w`, w ∈ {15, 60} | C_t / (Σ Q / Σ V em J_w) − 1 | J_w |
+
+O limite de negócios grandes tem a resolução das faixas, de ~19% (DEC-31).
+
+**Livro de ofertas (B7)**, canal top 20:
+
+| Feature | Definição | Minutos usados |
+|---|---|---|
+| `book_<medida>_<estatística>`: medidas `spread_rel`, `imbalance_1`, `imbalance_5`, `imbalance_10`, `imbalance_20` e `microprice_dist`; estatísticas `mean`, `min` e `last` | o valor do minuto t em `minute_book` (doc 06 §5.6) | t |
+| `imb1_chg_w`, `imb20_chg_w`, w ∈ {1, 5} | `imbalance_k_last` de t menos o de t − w (k = 1 ou 20) | t − w e t |
+
+São 59 features: 18 de candles, 7 de volume, 12 de fluxo e 22 de livro.
+
+**Minuto válido**, por canal:
+
+- **Ao vivo:** status `ok` ou `recovered`: o do canal de candles na máscara, o de `minute_trades` e o de `minute_book`. O minuto 23/10/2026 22:44 UTC é inválido nos negócios e no livro (exceção do doc 06 §8.2).
+- **Arquivo:** candle presente; para os negócios, status `ok` em `minute_trades` (sem id ausente).
+- **Disponível em t_d (§3.5):** ao vivo, o candle pelo `recv_ts_us` da mensagem fechada e o minuto de negócios pelo `last_recv_ts_us`. Se este for nulo (minuto sem negócios ao vivo, ou só com recuperados), o minuto vale como dado de arquivo: fim do minuto + L. Os snapshots do livro são agrupados pelo recebimento, então o minuto do livro está sempre disponível no seu fim. No arquivo, o fim do minuto + L. Minuto indisponível em t_d conta como inválido.
+
+**Ponto válido** numa família, com as regras de §3.4:
+
+1. Todos os minutos usados por janelas de até 60 min são válidos.
+2. Nas janelas de 240 e 1.440 minutos, os cálculos usam só os minutos válidos e exigem pelo menos 95% deles; os extremos de `ret_240` (t e t − 240) precisam ser válidos.
+3. Todas as features da família estão definidas (regra 7 de §5.1).
+
+As famílias são cumulativas: o ponto vale para o degrau B5 se for válido em candles e volume, e assim por diante. A janela mais longa é a de `large_frac_60` (60 + 1.440 minutos), o que dá o limite de 1.500 minutos da regra 6.
 
 ---
 
@@ -296,7 +365,7 @@ Os critérios estão congelados desde 26/10/2026 (commit que registra esta vers�
   - **Plano gratuito:** só lança tipos elegíveis à camada gratuita; o c7g foi recusado na primeira execução, embora o `run-instances --dry-run` tivesse sido aceito (doc 03 §7.8).
   - A arquitetura dessa EC2 (rede, IAM, como é lançada) entra no doc 03 antes da implementação.
 - O mesmo vale para o livro (agregados por minuto dos snapshots top 20), que já é pequeno.
-- Dependências novas (`xgboost`, `scikit-learn`, `polars` ou `duckdb`) ficam num grupo opcional de pesquisa, fora do pacote do host, até a V0.3 precisar do código de features ao vivo (doc 03 §5 será atualizado).
+- Dependências novas ficam num grupo opcional de pesquisa, fora do pacote do host, até a V0.3 precisar do código de features ao vivo (doc 03 §5): `numpy` para as features (DEC-34) e, na etapa 6, `xgboost` e `scikit-learn`.
 
 ---
 
@@ -342,7 +411,8 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | p99 do atraso ao vivo (PD-19) | **Resolvido:** 119 ms em negócios e 174 ms em candles na semana do CA-01 (doc 06 §8.6); L = 1 s mantida |
 | Modelo de preenchimento final e limites de drawdown | Doc 05 |
 | Degradação tolerada paper × backtest (H-05) | Doc 07 |
-| Requisitos RF-201 a RF-289 | SRS, depois da aprovação deste documento |
+| Requisitos RF-201 a RF-289 | SRS, antes de cada etapa: RF-201 a RF-213 (etapa 2, features) no SRS v0.10 |
+| Comparar os degraus de uma trilha nos mesmos pontos: a validade vem por família (§5.3), e o PRD (Apêndice B) pede a mesma janela; falta fixar se cada degrau usa os pontos válidos nele ou os válidos no degrau mais alto da trilha | Etapa 3 (datasets) |
 
 ---
 
@@ -373,3 +443,4 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | 1.1 | 31/10/2026 | Pendência do p99 (PD-19) resolvida com a medição da semana do G1; L = 1 s mantida. Método sem mudança. |
 | 1.2 | 06/11/2026 | Pendências da PD-23 atualizadas: c7g verificado; seção da EC2 escrita no doc 03 §7.8. Método sem mudança. |
 | 1.3 | 06/11/2026 | §12 e §15: c7g recusado pelo plano gratuito na primeira execução; instância passa a c7i-flex.large (DEC-33); tempo da primeira execução medido. Método sem mudança. |
+| 1.4 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-35), com os requisitos da etapa 2. DEC-34: §5.1, janelas fixas e valor indefinido tornando o ponto inválido; §5.2, ajustes do catálogo (desequilíbrio assinado relativo ao volume de 24 h, taxa de chegada fora de B6, janelas que faltavam); §5.3, definições exatas das 59 features, minuto válido, disponibilidade e ponto válido; §12, `numpy`. |

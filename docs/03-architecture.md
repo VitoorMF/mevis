@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.19 — rascunho |
+| Versão | 0.21 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -156,10 +156,12 @@ trader/
   storage/     layout de caminhos, escrita de Parquet, sincronização S3, retenção
   recovery/    estratégias de recuperação por canal
   aggregate/   agregados por minuto de negócios e do livro (doc 06 §5.6)    (sem E/S; mesmo código em lote e ao vivo)
+  features/    features point-in-time da V0.2 (doc 04 §5.3)              (sem E/S; mesmo código em pesquisa e operação)
   pipeline/    rodada horária: órfãos, compressão, normalização por hora, máscara, exportações,
                réplica e retenção; backfill dos arquivos públicos (doc 06 §7);
                relatório de qualidade (doc 06 §8.3); dados do painel da coleta (doc 06 §8.4);
-               publicador da página pública de status (§7.7); agregados por minuto (§7.8)
+               publicador da página pública de status (§7.7); agregados por minuto (§7.8);
+               montagem da série de minutos para as features (§5.1)
   public/      página pública de status (HTML estático, sem bibliotecas externas; §7.7)
   ops/         configuração, logs estruturados, StatsD, saúde, estado SQLite
   cli/         comandos
@@ -175,7 +177,33 @@ trader/
 | `boto3` | S3 | Só no pipeline e na CLI. No MacBook, `botocore[crt]` (só desenvolvimento) permite usar as credenciais de `aws login`. |
 | `sqlite3` (biblioteca padrão) | Estado operacional | Sem servidor. |
 | DuckDB, Polars | Leitura na pesquisa (MacBook) | DEC-20. Os agregados por minuto usam só `pyarrow`, para caber no pacote do host (PD-24, DEC-31). |
+| `numpy` | Cálculo das features (§5.1) | DEC-34. Grupo opcional `pesquisa`, fora do artefato do host até a V0.3 (RNF-029). |
 | `pytest`, `ruff`, `mypy` | Testes e qualidade | RNF-020. |
+
+### 5.1 Features da V0.2 (etapa 2; DEC-34; SRS §4.11)
+
+```text
+S3 (normalized/, derived/) ── cache local ──▶ pipeline/minutes: série de minutos
+   (DECIMAL; status e disponibilidade por canal)
+      ──▶ features: FLOAT64; 59 features e validade por família
+            ──▶ datasets (etapa 3) ou `trader features --out` (Parquet local)
+```
+
+- **Montagem** (`pipeline/minutes`): lê, para o período, os candles (de arquivo, `normalized/klines_1m/.../archive.parquet`; ao vivo, os arquivos horários), `derived/minute_trades`, `derived/minute_book` e, para o status do canal de candles, `derived/quality_mask`. Baixa do S3 só o que mudou para um cache local, como o `dashboard-data` (doc 06 §8.4). Recusa o holdout da trilha A com a mesma regra do job de agregados (RF-204, RF-179). Junta tudo numa linha por minuto, com o status e o horário de disponibilidade de cada canal, e marca inválido o minuto 23/10/2026 22:44 UTC nos negócios e no livro (doc 06 §8.2).
+- **Cálculo** (`features`): sem E/S. Recebe a série em arrays `numpy`, já em FLOAT64, e devolve as features e a validade por família (doc 04 §5.3). A janela mais longa olha 1.500 minutos para trás.
+- **Ao vivo (V0.3):** o Trading Engine mantém os últimos 1.500 minutos (~25 h), chama o mesmo cálculo a cada minuto e usa a última linha. Um teste garante a paridade com o cálculo em lote (RF-206). O `numpy` entra no artefato do host nesse momento.
+- **Tamanho:** 9 meses são ~393 mil minutos; com ~60 colunas FLOAT64, ~190 MB em memória (RNF-028: até 4 GiB). O cache local da trilha A tem ~150 MB: 124 MB de agregados de arquivo e ~25 MB de candles (medido no S3 em 07/11/2026). Cabe no disco do MacBook (~7 GB livres).
+
+**Implementação (07/11/2026).** Módulos `features/series.py` (série de minutos e conversão de DECIMAL para FLOAT64, RF-212), `features/windows.py` (janelas), `features/compute.py` (catálogo, fórmulas e validade), `pipeline/minutes.py` (montagem) e `storage/s3cache.py` (cache do S3 pelo ETag, o mesmo do `dashboard-data`); comando `trader features` (RF-213). Detalhes que o texto acima não fixava:
+
+- **Somas em ordem fixa.** Cada janela soma os seus w minutos sempre do mais antigo ao mais novo, sem somas acumuladas de ponto flutuante, cujo arredondamento dependeria de onde a série começa. Assim, calcular sobre a série inteira ou sobre os últimos 1.500 minutos dá o mesmo valor bit a bit (RF-206 pede 10⁻⁹). Só as contagens de minutos válidos e as contagens das faixas de tamanho usam somas acumuladas, que são inteiras e exatas.
+- **Disponibilidade dos minutos anteriores a t.** O minuto t entra no seu ponto se chegou até 2 s depois do fim; um minuto anterior entra se chegou até 62 s depois do fim, que é o t_d do ponto seguinte. Um minuto mais atrasado que isso fica fora de todos os pontos, inclusive dos mais distantes, em que já estaria disponível. É mais rígido que doc 04 §5.3, nunca menos: o point-in-time vale do mesmo jeito, e a regra fica uma só por minuto. Na prática quase não acontece: negócios com atraso acima de 5 s já marcam o minuto como `late` na máscara (doc 06 §8.1), e candle recuperado não tem horário de recebimento.
+- **Sem aquecimento.** A montagem não lê dias antes do início pedido, para nunca encostar no holdout sem querer; os primeiros 1.500 minutos do período ficam sem histórico para as janelas longas e saem inválidos nas famílias que precisam dele.
+- **Ponto inválido, valor nulo.** Onde a família é inválida, as features dela ficam nulas na saída, mesmo que alguma seja calculável.
+- **Saída do comando.** Parquet com as 59 features, `minute_ts_us`, `decision_ts_us` e uma coluna `valid_<família>`; os metadados (`mevis.features`) guardam o catálogo e a sua identificação (SHA-256 dos nomes e parâmetros), a versão do código, o período, a opção do holdout e o SHA-256 da lista de entradas (RF-209, RF-204).
+- **Testes** (`tests/test_features.py`, `tests/test_minutes.py`): cada feature contra uma implementação de referência minuto a minuto, validade e disponibilidade nos limites das janelas, perturbação de tudo o que vem depois de t_d (RF-210), paridade com os últimos 1.500 minutos em pontos com minutos inválidos e atrasados (RF-206), determinismo (RF-211), montagem com dias de arquivo e ao vivo, exceção de 23/10/2026, recusa do holdout, cache do S3 e CLI sem `numpy` (RNF-029).
+
+**MD-30 — medição da etapa 2 (07/11/2026, MacBook, RNF-028):** período de desenvolvimento da trilha A (23/10/2025 a 22/07/2026: 273 dias de arquivo, 393.120 minutos), lido do S3 para um cache local de 144 MB (546 arquivos de candles e `minute_trades`). Com o cache cheio, a montagem levou 5,1 s e o cálculo 4,1 s (11 s no total), com pico de 2,5 GB no processo (RNF-028: até 10 min e 4 GiB). A primeira execução, que baixa o cache, levou 4 min 21 s. A primeira versão chegava a 3,7 GB, porque o `take` do Arrow junta os pedaços de cada dia antes de copiar; agora a montagem usa as colunas lidas direto quando já há uma linha por minuto, em ordem, e o cálculo guarda as contagens das faixas em int32. Pontos válidos: 99,9% em candles e 99,6% em volume e em fluxo. Os inválidos são exatamente os minutos sem histórico no início do período (240, 1.439 e 1.499): nenhum minuto de arquivo inválido no período. Livro: 0%, porque os dias de arquivo não têm livro (doc 06 §5.6). Saída: Parquet de 105 MB em `data/features/`, fora do Git.
 
 ---
 
@@ -551,7 +579,7 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 
 | Versão | Onde roda | Notas |
 |---|---|---|
-| V0.2 (pesquisa) | MacBook; agregados por minuto na instância sob demanda (§7.8) e, para as horas novas, no pipeline do host (PD-24, DEC-31) | DuckDB e Polars sobre o cache local de Parquet; treino de XGBoost local. Custo de nuvem: ~US$ 0,60 por execução dos agregados. |
+| V0.2 (pesquisa) | MacBook; agregados por minuto na instância sob demanda (§7.8) e, para as horas novas, no pipeline do host (PD-24, DEC-31) | Features com `numpy` sobre o cache local de Parquet (§5.1, DEC-34); treino de XGBoost local. Custo de nuvem: ~US$ 0,10 por execução dos agregados (DEC-33). |
 | V0.3 (paper trading) | Mesmo host de coleta | **ADR-11 (preliminar):** o Trading Engine abre a própria conexão de mercado, usando os mesmos módulos `sources` e `normalize` (PP-05), sem acoplar o seu ciclo de vida ao do coletor. A memória adicional (modelo e estado) será dimensionada no doc 03 v0.2, junto com o doc 05; pode exigir manter o t4g.small. |
 
 ---
@@ -609,3 +637,5 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.17 | 06/11/2026 | §6.3: agregados por minuto no pipeline horário; §7.8: implementação e aplicação do módulo `job_runner`, scripts de lançamento e medição no MacBook. |
 | 0.18 | 06/11/2026 | §7.8 e §10.1: a primeira execução foi recusada pelo plano gratuito (c7g.2xlarge não elegível; o `--dry-run` não confere isso); tipo trocado para c7i-flex.large, com AMI x86_64 (DEC-33). Primeira execução: 9 meses em ~8 min, ~US$ 0,01, conferida contra os candles do arquivo. |
 | 0.19 | 07/11/2026 | §7.8: segunda execução (horas ao vivo de 23/10 a 06/11/2026) e conferência contra os candles ao vivo. |
+| 0.20 | 07/11/2026 | §5.1 aprovado em 07/11/2026 (DEC-35), com os requisitos da etapa 2 da V0.2 (DEC-34): §5, pacote `features` e montagem da série de minutos; §5.1, fluxo, cálculo ao vivo e tamanho; `numpy` no grupo opcional de pesquisa; §13 atualizado. |
+| 0.21 | 07/11/2026 | §5.1: implementação da etapa 2 (somas em ordem fixa, disponibilidade dos minutos anteriores, sem aquecimento, saída do comando, testes) e MD-30 (9 meses no MacBook em 11 s, pico de 2,5 GB). |

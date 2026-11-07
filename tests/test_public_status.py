@@ -8,9 +8,9 @@ from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
-from test_dashboard_data import FakeS3
 from test_pipeline import END, START, build_scenario, run
 
+from conftest import FakeS3
 from trader.cli.main import main
 from trader.ops.config import PipelineConfig
 from trader.ops.health import health_path, write_health

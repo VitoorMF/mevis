@@ -1,19 +1,16 @@
 """Dados do painel da coleta (doc 06 §8.4)."""
 
 import csv
-import hashlib
-import io
 import json
-from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import zstandard
 from test_pipeline import END, START, build_scenario, run
 
+from conftest import FakeS3
 from trader.ops.config import PipelineConfig
 from trader.ops.state import StateStore
 from trader.pipeline.dashboard_data import export, sync_from_s3
@@ -93,42 +90,6 @@ def test_highlights(tmp_path: Path) -> None:
         "2025-10-24",
     )
     assert int(highlights["raw_stored_bytes"]) < int(highlights["raw_received_bytes"])
-
-
-class FakeS3:
-    def __init__(self, objects: dict[str, bytes]) -> None:
-        self.objects = objects
-        self.downloads: list[str] = []
-        self.reads: list[str] = []
-
-    def _etag(self, key: str) -> str:
-        return '"' + hashlib.md5(self.objects[key]).hexdigest() + '"'
-
-    def head_object(self, Bucket: str, Key: str) -> dict[str, Any]:
-        return {"ETag": self._etag(Key)}
-
-    def get_paginator(self, name: str) -> Any:
-        fake = self
-
-        class Paginator:
-            def paginate(self, Bucket: str, Prefix: str) -> Iterator[dict[str, Any]]:
-                keys = sorted(k for k in fake.objects if k.startswith(Prefix))
-                yield {
-                    "Contents": [
-                        {"Key": k, "ETag": fake._etag(k), "Size": len(fake.objects[k])}
-                        for k in keys
-                    ]
-                }
-
-        return Paginator()
-
-    def download_file(self, bucket: str, key: str, path: str) -> None:
-        Path(path).write_bytes(self.objects[key])
-        self.downloads.append(key)
-
-    def get_object(self, Bucket: str, Key: str) -> dict[str, Any]:
-        self.reads.append(Key)
-        return {"Body": io.BytesIO(self.objects[Key])}
 
 
 def test_sync_downloads_only_live_files_that_changed(tmp_path: Path) -> None:
