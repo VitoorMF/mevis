@@ -14,7 +14,7 @@ infra/
     collector_host/     IAM, EC2 t4g, script de inicialização, systemd, trader-deploy, alarmes
     observability/      grupos de log, SNS por e-mail, orçamento mensal
     public_status/      página pública de status: bucket fechado + CloudFront com OAC (doc 03 §7.7)
-    job_runner/         instância sob demanda: modelo de lançamento c7g, papel e logs (doc 03 §7.8)
+    job_runner/         instância sob demanda: modelo de lançamento c7i-flex, papel e logs (doc 03 §7.8)
 ```
 
 ## Pré-requisitos

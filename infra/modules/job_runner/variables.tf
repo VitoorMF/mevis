@@ -4,8 +4,8 @@ variable "name" {
 
 variable "instance_type" {
   type        = string
-  default     = "c7g.2xlarge"
-  description = "8 vCPUs Graviton e 16 GiB (PD-23); verificado em 06/11/2026 (doc 03 §7.8)."
+  default     = "c7i-flex.large"
+  description = "2 vCPUs x86 e 4 GiB, elegível ao plano gratuito da conta (DEC-33, doc 03 §7.8)."
 }
 
 variable "root_volume_gb" {

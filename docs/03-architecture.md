@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.17 — rascunho |
+| Versão | 0.18 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -348,27 +348,38 @@ MacBook: scripts/run-job.sh aggregates --start AAAA-MM-DD --end AAAA-MM-DD [--ve
 | Item | Configuração | Motivo |
 |---|---|---|
 | Modelo de lançamento | `trader-job`, no Terraform (módulo `job_runner`) | Parado, não custa nada; a configuração fica revisada no Git. |
-| Tipo | c7g.2xlarge (8 vCPU Graviton, 16 GiB), sob demanda | PD-23. Mesma arquitetura do host; um dia de negócios por núcleo. |
-| Sistema | Amazon Linux 2023 ARM64, AMI resolvida pelo parâmetro público do SSM no lançamento | Igual ao host. |
+| Tipo | c7i-flex.large (2 vCPU x86, 4 GiB), sob demanda | DEC-33: o plano gratuito da conta só lança tipos elegíveis à camada gratuita, e este é o de computação com mais folga de memória por processo (~0,6 GB no pior dia). Um dia de negócios por núcleo. Antes: c7g.2xlarge (PD-23), recusado. |
+| Sistema | Amazon Linux 2023 x86_64, AMI resolvida pelo parâmetro público do SSM no lançamento | Mesmo sistema do host, em outra arquitetura. O artefato é Python puro e o `requirements.txt` traz os hashes das rodas x86_64 do pyarrow e do zstandard (conferido em 06/11/2026): a mesma versão publicada serve às duas máquinas. |
 | Disco | gp3, 20 GB, criptografado, apagado com a instância | Só o ambiente Python e arquivos temporários; os dados vêm do S3 e voltam para ele. |
 | Rede | Sub-rede pública e security group do host: sem entrada, saída TCP 443 | ADR-06. A internet só serve para baixar o Python e as dependências, como no host; os dados passam pelo endpoint de gateway do S3. |
 | Metadados | IMDSv2 obrigatório, limite de saltos 1 | RNF-014. |
 | Encerramento | `instance_initiated_shutdown_behavior = terminate`, com a trava de 3 h | Nada fica ligado por esquecimento. |
 | Papel `trader-job` | `s3:GetObject` em `artifacts/`, `normalized/` e `derived/quality_mask/`; `s3:PutObject` em `derived/minute_trades/`, `derived/minute_book/` e `derived/ops/jobs/`; `s3:ListBucket`; logs em `/trader/jobs`; política gerenciada do SSM, só para investigar uma execução em andamento. **Sem `s3:DeleteObject`** | ADR-08, RNF-014. |
 | Logs | Grupo `/trader/jobs`, retenção de 14 dias | Camada gratuita. |
-| Spot | Não | Com ~US$ 0,60 por execução, a economia não compensa o risco de interrupção. |
+| Spot | Não | Com ~US$ 0,10 por execução, a economia não compensa o risco de interrupção. |
 
 - **Quem lança:** o operador, do MacBook, com o perfil `trader` e a confirmação do custo estimado. Nada é agendado.
 - **Plano B (PD-23):** o mesmo comando roda no MacBook (`trader aggregates`), lendo do S3 dia a dia (~6 h; ~12 GB de saída do S3).
-- **Custo:** US$ 0,289/h (c7g.2xlarge) + US$ 0,005/h (IPv4) por ~2 h, mais o disco por algumas horas: **~US$ 0,60 por execução**, dos créditos (estimativa aprovada em 26/10/2026). Com a PD-26 (b), DEC-31,, a primeira execução cobre 9 meses (~US$ 0,45) e a do holdout fica para a avaliação final (~US$ 0,15).
+- **Custo (DEC-33):** US$ 0,0848/h (c7i-flex.large, preço da API de preços em 06/11/2026) + US$ 0,005/h (IPv4) por menos de 1 h, mais o disco: **~US$ 0,10 por execução**, dos créditos; a trava de 3 h limita o pior caso a ~US$ 0,27. Com a PD-26 (b), DEC-31, a primeira execução cobre 9 meses e a do holdout fica para a avaliação final. A estimativa anterior, com o c7g.2xlarge, era ~US$ 0,60 (aprovada em 26/10/2026).
 - **Verificado em 06/11/2026**, sem criar nada:
   1. `aws ec2 run-instances --dry-run` com c7g.2xlarge, a AMI ARM64, a sub-rede e o security group do projeto responde `DryRunOperation` ("teria funcionado"): nem a SCP da organização nem o plano gratuito bloqueiam o tipo. A documentação do plano gratuito só exclui serviços como Savings Plans e instâncias reservadas. O c7g não é elegível à camada gratuita: o uso sai dos créditos, como previsto.
   2. Cota de vCPUs sob demanda (`L-1216C47A`): 16. O host usa 2; a instância, 8.
   3. A zona da sub-rede (`us-east-2a`) oferece c7g.2xlarge.
 
   O teste de verdade é a primeira execução: se ela for recusada, nada é criado nem cobrado, e as alternativas são o m7i-flex.large (2 vCPU x86, 8 GiB; elegível à camada gratuita, ~4× mais lento) ou o plano B.
+- **Primeira execução recusada em 06/11/2026** (21:25, horário de Brasília): `RunInstances` respondeu `InvalidParameterCombination`, "The specified instance type is not eligible for Free Tier". O `--dry-run` confere permissões, não a elegibilidade do plano gratuito, então o item 1 acima estava errado. Nada foi criado nem cobrado. Tipos que o plano gratuito lança em us-east-2 (`describe-instance-types --filters Name=free-tier-eligible,Values=true`): t3.micro, t3.small, t4g.micro, t4g.small, t8i.micro, t8i.small, c7i-flex.large e m7i-flex.large. Os t têm créditos de CPU e no máximo 2 GiB; entre o c7i-flex.large (4 GiB, US$ 0,0848/h) e o m7i-flex.large (8 GiB, US$ 0,0958/h), basta o primeiro. Opções apresentadas ao operador: c7i-flex.large, plano B ou migrar a conta para o plano pago (sem volta ao gratuito; depois dos créditos, cobrança no cartão). **Escolhido: c7i-flex.large (DEC-33).**
 - **Implementado e aplicado em 06/11/2026** (plano revisado pelo operador; nenhuma instância lançada): módulo `infra/modules/job_runner` (modelo de lançamento, papel, grupo de logs), `scripts/run-job.sh` e `scripts/job-bootstrap.sh`. O `run-job.sh` confere a conta, recusa o holdout, confere que a versão está publicada, mostra o custo e pede confirmação; gera o user_data de cada execução a partir do `job-bootstrap.sh`, com versão e argumentos. O user_data do próprio modelo só desliga a instância, para que um lançamento sem argumentos (pelo console, por engano) não fique ligado. O `s3:ListBucket` do papel fica restrito aos prefixos do job. No fim, o script baixa o manifesto e o log para `data/jobs/<id>/`.
 - **Medição no MacBook (doc 06 MD-29):** o pior dia leva ~10 s e ~0,6 GB por processo. A primeira execução deve durar bem menos que as ~2 h estimadas, dominada pela inicialização e pela leitura do S3; a estimativa de custo continua a mesma até ser medida.
+- **Primeira execução em 06/11/2026** (22:48, horário de Brasília; job `aggregates-20261107T014842Z`, versão `0.1.0.dev0-752fb02`), de 23/10/2025 a 22/07/2026:
+  - **Tempo e custo:** ~8 min de instância ligada: ~1 min de instalação, 6 min (376 s) de processamento com 2 processos e o desligamento. ~US$ 0,01 dos créditos.
+  - **Volume:** 273 dias de arquivo e 1.146.828.296 negócios, gravados em 273 arquivos (124 MB, ~0,45 MB por dia).
+  - **Memória:** pico de 413 MB por processo.
+  - **Fronteiras e lacunas:** nenhum salto de id entre dias e nenhum minuto `missing`. Único aviso: a fronteira com 23/07/2026 não foi conferida, porque o vizinho está no holdout, como previsto.
+  - **Conferido no MacBook:**
+    - SHA-256 e 1440 linhas por arquivo, iguais ao manifesto;
+    - soma dos negócios igual à do manifesto;
+    - histograma de tamanhos coerente com a contagem e o volume de cada minuto;
+    - nos 393.120 minutos, contagem, volume, volume em USDT, volumes do lado comprador e OHLC iguais aos dos candles de 1 min do arquivo da Binance (os candles do arquivo não trazem os ids de negócio).
 
 ### 7.6 Terraform (DEC-22, ADR-10)
 
@@ -454,7 +465,7 @@ O passo a passo com comandos está em `infra/README.md`.
 | Item | US$/mês |
 |---|---|
 | t4g.small / t4g.micro / t4g.nano | 12,26 / 6,13 / 3,07 |
-| c7g.2xlarge, sob demanda (§7.8) | US$ 0,289 por hora de uso; ~US$ 0,60 por execução |
+| c7i-flex.large, sob demanda (§7.8, DEC-33) | US$ 0,0848 por hora de uso; ~US$ 0,10 por execução |
 | gp3, 16 GB | 1,28 |
 | IPv4 público | 3,65 (ou 0 se houver franquia de 750 h) |
 | S3 Standard (US$ 0,023/GB-mês) | ~0,17 no 1º mês → ~1,96 no 12º (doc 06 §6.3) |
@@ -590,3 +601,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.15 | 31/10/2026 | Aprovado em 31/10/2026. §9.2: defeito da troca do coletor (saúde antiga contada como prontidão) e correção; §6.3: conferência de continuidade no pipeline. |
 | 0.16 | 06/11/2026 | Aprovado em 06/11/2026 (DEC-32). ADR-14 e §7.8: instância de processamento sob demanda para os agregados por minuto (PD-23), com plano, cota e zona verificados; §5: pacote `aggregate`; §8, §10 e §13 ajustados. |
 | 0.17 | 06/11/2026 | §6.3: agregados por minuto no pipeline horário; §7.8: implementação e aplicação do módulo `job_runner`, scripts de lançamento e medição no MacBook. |
+| 0.18 | 06/11/2026 | §7.8 e §10.1: a primeira execução foi recusada pelo plano gratuito (c7g.2xlarge não elegível; o `--dry-run` não confere isso); tipo trocado para c7i-flex.large, com AMI x86_64 (DEC-33). Primeira execução: 9 meses em ~8 min, ~US$ 0,01, conferida contra os candles do arquivo. |

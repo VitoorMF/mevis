@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 export AWS_PROFILE="${AWS_PROFILE:-trader}"
 export AWS_REGION="us-east-2"
 ACCOUNT="019419901344"
-PRICE_HOUR="0.294" # c7g.2xlarge US$ 0,289/h + IPv4 público US$ 0,005/h (doc 03 §7.8)
+PRICE_HOUR="0.090" # c7i-flex.large US$ 0,0848/h + IPv4 público US$ 0,005/h (doc 03 §7.8, DEC-33)
 
 usage() {
   sed -n '3,5p' "$0" >&2
@@ -68,8 +68,8 @@ fi
 
 MAX_COST="$(python3 -c "print(f'{$PRICE_HOUR * $MAX_HOURS:.2f}')")"
 echo "Job: aggregates de $START a $END ${HOLDOUT:+(com holdout) }com a versão $VERSION"
-echo "Custo: c7g.2xlarge sob demanda, ~US\$ $PRICE_HOUR/h, pago pelos créditos; ~2 h para 9"
-echo "meses (~US\$ 0,60). A instância se encerra sozinha em no máximo $MAX_HOURS h (~US\$ $MAX_COST)."
+echo "Custo: c7i-flex.large sob demanda, ~US\$ $PRICE_HOUR/h, pago pelos créditos; menos de 1 h"
+echo "para 9 meses (~US\$ 0,10). A instância se encerra sozinha em no máximo $MAX_HOURS h (~US\$ $MAX_COST)."
 read -r -p "Lançar? [s/N] " ANSWER
 [ "$ANSWER" = "s" ] || { echo "nada foi lançado"; exit 1; }
 

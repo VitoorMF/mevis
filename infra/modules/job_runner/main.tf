@@ -88,7 +88,7 @@ resource "aws_launch_template" "job" {
   description = "Processamento sob demanda (doc 03 secao 7.8); lancado por scripts/run-job.sh"
 
   # AMI resolvida no lançamento pelo parâmetro público do SSM: sempre a mais recente, como o host.
-  image_id                             = "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
+  image_id                             = "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
   instance_type                        = var.instance_type
   instance_initiated_shutdown_behavior = "terminate"
   ebs_optimized                        = true

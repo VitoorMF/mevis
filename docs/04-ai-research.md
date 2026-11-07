@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 04 — AI & Quantitative Research |
-| Versão | 1.2 — aprovado |
+| Versão | 1.3 — aprovado |
 | Escopo desta versão | Método de pesquisa da V0.2: dados e períodos, formulação do problema, features, baselines, modelos, validação, custos, métricas, critérios de G2 a pré-registrar, registro de experimentos e plano de trabalho. |
 | Status | Aprovado em 26/10/2026 (DEC-28). Decisões PD-15 a PD-23 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
 | Data | 26/10/2026 |
@@ -288,12 +288,12 @@ Os critérios estão congelados desde 26/10/2026 (commit que registra esta vers�
 
 - **Pesquisa no MacBook** (doc 03; doc 02 §2.3). O disco tem pouco espaço livre (~7 GB em 24/10/2026), então os negócios brutos não são copiados para o Mac.
 - **[DECISÃO] PD-23:** um passo prévio transforma negócios em **agregados por minuto** (RF-171 e RF-172: volume por lado do agressor, contagem, VWAP, estatísticas de tamanho) e grava o resultado em `derived/minute_trades/` no S3. 12 meses de negócios (11,9 GB) viram algumas centenas de MB. Roda numa **EC2 dedicada e temporária**, na conta e na região do projeto:
-  - **Instância:** c7g.2xlarge (8 vCPUs Graviton, 16 GiB), US$ 0,289/h sob demanda em us-east-2 (preço consultado em 26/10/2026). Processa um dia de negócios por núcleo; ~1 a 2 h para os 12 meses [HIPÓTESE, a medir na primeira execução].
-  - **Custo:** ~US$ 0,60 por execução, pago pelos créditos (estimativa aprovada em 26/10/2026). Sem tráfego pela internet: lê do S3 pelo endpoint da VPC, na mesma região.
+  - **Instância:** c7i-flex.large (2 vCPUs x86, 4 GiB), US$ 0,0848/h sob demanda em us-east-2 (DEC-33, 06/11/2026; antes c7g.2xlarge, recusado pelo plano gratuito). Processa um dia de negócios por núcleo; os 9 meses fora do holdout levaram ~8 min de instância (~US$ 0,01) na primeira execução, em 06/11/2026 (doc 03 §7.8).
+  - **Custo:** ~US$ 0,10 por execução, pago pelos créditos (antes ~US$ 0,60, estimativa aprovada em 26/10/2026). Sem tráfego pela internet: lê do S3 pelo endpoint da VPC, na mesma região.
   - **Segurança e custo sob controle:** papel IAM só com leitura de `normalized/trades/` e gravação em `derived/minute_trades/`; a instância se encerra e se apaga sozinha ao terminar, com um limite de horas como trava (desligamento iniciado pela instância com comportamento `terminate`).
   - **Não toca o coletor:** a máquina de produção não divide CPU com o processamento.
   - **Plano B:** MacBook, lendo do S3 dia a dia (~6 h; ~12 GB de saída do S3).
-  - **[A VERIFICAR]** se o plano gratuito da conta libera instâncias c7g: conferir com `run-instances --dry-run` (não cria nada) antes da primeira execução.
+  - **Plano gratuito:** só lança tipos elegíveis à camada gratuita; o c7g foi recusado na primeira execução, embora o `run-instances --dry-run` tivesse sido aceito (doc 03 §7.8).
   - A arquitetura dessa EC2 (rede, IAM, como é lançada) entra no doc 03 antes da implementação.
 - O mesmo vale para o livro (agregados por minuto dos snapshots top 20), que já é pequeno.
 - Dependências novas (`xgboost`, `scikit-learn`, `polars` ou `duckdb`) ficam num grupo opcional de pesquisa, fora do pacote do host, até a V0.3 precisar do código de features ao vivo (doc 03 §5 será atualizado).
@@ -336,7 +336,7 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | Item | Onde se resolve |
 |---|---|
 | Taxa de spot da Binance em vigor | [A VERIFICAR] antes da etapa 4 |
-| Plano gratuito libera instâncias c7g (PD-23) | **Resolvido em 06/11/2026:** `run-instances --dry-run` aceito; cota de 16 vCPUs (doc 03 §7.8) |
+| Plano gratuito libera instâncias c7g (PD-23) | **Resolvido em 06/11/2026:** não libera. O `--dry-run` foi aceito, mas a execução real foi recusada; tipo trocado para c7i-flex.large (DEC-33, doc 03 §7.8) |
 | Seção da EC2 dedicada (rede, IAM, lançamento) | Aprovada no doc 03 §7.8 (06/11/2026, DEC-32) |
 | Franquia de saída de dados do S3 no plano gratuito | [A VERIFICAR] só se o plano B (MacBook) for usado |
 | p99 do atraso ao vivo (PD-19) | **Resolvido:** 119 ms em negócios e 174 ms em candles na semana do CA-01 (doc 06 §8.6); L = 1 s mantida |
@@ -372,3 +372,4 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | 1.0 | 26/10/2026 | Aprovado (DEC-28): catálogo de features, baselines, modelos e grade, validação e plano. §3.4 e §5.1: janelas de até 60 min e do alvo continuam estritas; janelas de 240 min e 24 h usam só minutos válidos e exigem ≥ 95% deles. |
 | 1.1 | 31/10/2026 | Pendência do p99 (PD-19) resolvida com a medição da semana do G1; L = 1 s mantida. Método sem mudança. |
 | 1.2 | 06/11/2026 | Pendências da PD-23 atualizadas: c7g verificado; seção da EC2 escrita no doc 03 §7.8. Método sem mudança. |
+| 1.3 | 06/11/2026 | §12 e §15: c7g recusado pelo plano gratuito na primeira execução; instância passa a c7i-flex.large (DEC-33); tempo da primeira execução medido. Método sem mudança. |
