@@ -4,8 +4,8 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 01 — PRD |
-| Versão | 0.18 — rascunho |
-| Status | Decisões até DEC-39; aguardando confirmação da conta AWS e revisão final (§19) |
+| Versão | 0.19 — rascunho |
+| Status | Decisões até DEC-40; aguardando confirmação da conta AWS e revisão final (§19) |
 | Data | 23/10/2026 |
 | Responsável pelo produto | *a preencher* |
 | Fonte | [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -575,6 +575,7 @@ O MVP é aceito quando **todos** os critérios abaixo forem atendidos, **indepen
 | DEC-37 | Etapa 3 da V0.2 aprovada | Requisitos dos datasets e do alvo (SRS v0.11: RF-221 a RF-229, RNF-030), alvo, pontos elegíveis, preço de execução e formato do dataset (doc 04 v1.5), arquitetura (doc 03 §5.2) e esquema versão 2 de `minute_trades` (doc 06 §5.6), aprovados em 07/11/2026. |
 | DEC-38 | Simulador, baselines e registro (etapas 4 e 5 da V0.2) | Decisões PD-35 a PD-38 (07/11/2026): o dataset ganha colunas de simulação (preço de execução da latência de estresse, fechamento e máxima dos 60 minutos anteriores), que os modelos não leem; o cenário de estresse de custos do IS-19 junta taxa de 0,15%, deslizamento de 0,03% e latência de 2 s; as tentativas do IS-15 são as configurações distintas de modelo avaliadas, sem contar repetições, execuções com erro nem baselines; o drawdown é medido com o capital marcado minuto a minuto pelo fechamento. Os dois esclarecimentos de G2 vêm antes de qualquer avaliação do holdout (doc 04 §6, §9, §10 e §11; SRS §4.13). |
 | DEC-39 | Etapas 4 e 5 da V0.2 aprovadas | Requisitos do simulador, dos baselines e do registro de experimentos (SRS v0.12: RF-231 a RF-234, RF-251 a RF-257, RF-271 a RF-276, RNF-031; RF-226 com as colunas de simulação), cenários de custo, métricas, baselines e registro (doc 04 v1.6) e arquitetura (doc 03 §5.3), aprovados em 07/11/2026. |
+| DEC-40 | Interpretações dos agregados por minuto confirmadas | As quatro interpretações registradas na implementação de doc 06 §5.6 ficam como estão (08/11/2026): num salto de id em dia de arquivo, os minutos dos dois negócios das pontas também ficam `missing`; `last_recv_ts_us` ignora os negócios recuperados do arquivo, sem horário de recebimento; `snapshot_count` conta também os snapshots com livro cruzado, que ficam fora das medidas; `minute_trades` e `minute_book` têm a coluna `symbol`. |
 
 Permanecem **em aberto**: as pendências de §17.2.
 
@@ -661,6 +662,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | 0.16 | 07/11/2026 | PD-27 a PD-30 apresentadas e decididas no mesmo dia (DEC-34): biblioteca de features da etapa 2 da V0.2. DEC-35: etapa 2 aprovada. |
 | 0.17 | 07/11/2026 | PD-31 a PD-34 apresentadas e decididas no mesmo dia (DEC-36): datasets e alvo da etapa 3 da V0.2. DEC-37: etapa 3 aprovada. |
 | 0.18 | 07/11/2026 | PD-35 a PD-38 apresentadas e decididas no mesmo dia (DEC-38): simulador, baselines e registro de experimentos das etapas 4 e 5 da V0.2. DEC-39: etapas 4 e 5 aprovadas. |
+| 0.19 | 08/11/2026 | DEC-40: interpretações dos agregados por minuto (doc 06 §5.6) confirmadas sem mudança. |
 
 ---
 

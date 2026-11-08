@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 06 — Data & Integrations |
-| Versão | 0.22 — rascunho |
+| Versão | 0.23 — rascunho |
 | Escopo desta versão | Dados de mercado da Binance para a V0.1, com as necessidades de dados da V0.2 e da V0.3 que já afetam o formato. Fontes macro (V0.4) apenas citadas (§11). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
@@ -384,7 +384,7 @@ As medidas do livro são razões e já ficam em FLOAT64; é a única exceção �
 
 **Determinismo (RF-173).** Ordem fixa das linhas e dos arquivos de entrada; as somas em DECIMAL não dependem da ordem; as médias em FLOAT64 somam os snapshots em ordem de `recv_ts_us`. Duas execuções sobre as mesmas entradas geram o mesmo conteúdo.
 
-**Implementação (06/11/2026).** Pacote `trader/aggregate` (sem E/S), chamado pelo pipeline horário para cada hora normalizada e pelo comando `trader aggregates` para períodos (doc 03 §7.8). Detalhes que o texto acima não fixava:
+**Implementação (06/11/2026).** Pacote `trader/aggregate` (sem E/S), chamado pelo pipeline horário para cada hora normalizada e pelo comando `trader aggregates` para períodos (doc 03 §7.8). Detalhes que o texto acima não fixava; as quatro primeiras interpretações foram confirmadas pelo responsável em 08/11/2026, sem mudança [DECISÃO] DEC-40:
 
 - **Arquivo:** os minutos dos dois negócios de um salto de id também ficam `missing`, porque os ids ausentes podem estar em qualquer um deles; um minuto com id ausente entre os seus próprios negócios também. Na virada do dia, o job confere o último negócio de um dia com o primeiro do seguinte; um vizinho fora do período ou no holdout fica registrado como aviso no manifesto.
 - **`last_recv_ts_us`:** negócios recuperados do arquivo (§9.1) não têm `recv_ts_us` e ficam fora do máximo; a coluna é nula num minuto sem negócios ou só com recuperados. Na disponibilidade, o nulo vale como dado de arquivo: o minuto está disponível no seu fim + L (doc 04 §5.3).
@@ -719,3 +719,4 @@ GDELT, Trading Economics, FRED e outras (contexto inicial, §5.5 a §5.7). Requi
 | 0.20 | 07/11/2026 | Aprovado em 07/11/2026. §8.1 e §8.2: regra de início de coleta (o primeiro minuto dos canais contínuos fica `missing`), decidida em 07/11/2026; 23/10/2026 22:44 UTC fica como exceção conhecida, descartada nos datasets. |
 | 0.21 | 07/11/2026 | §5.6: nulo de `last_recv_ts_us` vale como dado de arquivo na disponibilidade (doc 04 §5.3); §8.2 e §13: a exceção de 23/10/2026 passa à montagem da série de minutos (etapa 2, RF-203). |
 | 0.22 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-37). §5.6: preço e horário de execução por minuto em `minute_trades` (versão 2 do esquema), para o alvo e o simulador da etapa 3 (DEC-36, RF-221, RF-222). |
+| 0.23 | 08/11/2026 | §5.6: as quatro interpretações da implementação (pontas do salto de id, recuperados fora de `last_recv_ts_us`, `snapshot_count` com os snapshots cruzados e a coluna `symbol`) confirmadas sem mudança (DEC-40). |
