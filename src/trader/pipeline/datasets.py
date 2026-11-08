@@ -34,6 +34,7 @@ from trader.datasets.labels import (
     LabelParams,
     compute_labels,
     dataset_table,
+    simulation_columns,
 )
 from trader.features.compute import catalog_id, compute_features
 from trader.features.series import series_from_table
@@ -134,15 +135,21 @@ def build_dataset(
         execution=True,
     )
     assert minutes.execution is not None
-    price_column = minutes.execution[request.params.price_column]
-    price = pc.cast(price_column, pa.float64()).to_numpy(zero_copy_only=False)
+    price, stress = (
+        pc.cast(minutes.execution[column], pa.float64()).to_numpy(zero_copy_only=False)
+        for column in (request.params.price_column, request.params.stress_price_column)
+    )
     series = series_from_table(minutes.table)
     del minutes.table, minutes.execution
     labels = compute_labels(price, series.trades.valid, request.params)
+    candles = series.candles
+    simulation = simulation_columns(
+        candles.values["close"], candles.values["high"], candles.valid, stress
+    )
     frame = compute_features(series)
-    del series
-    table = dataset_table(frame, labels, request.track)
-    del frame
+    del series, candles
+    table = dataset_table(frame, labels, request.track, simulation)
+    del frame, simulation
 
     inputs = sorted(minutes.inputs, key=lambda i: i["key"])
     identity = {

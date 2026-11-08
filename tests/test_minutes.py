@@ -427,5 +427,8 @@ def test_cli_does_not_need_numpy() -> None:
         "assert 'trader.pipeline.minutes' not in sys.modules\n"
         "assert not any(m.startswith('trader.datasets') for m in sys.modules)\n"
         "assert 'trader.pipeline.datasets' not in sys.modules\n"
+        "assert not any(m.startswith('trader.backtest') for m in sys.modules)\n"
+        "assert 'trader.pipeline.baselines' not in sys.modules\n"
+        "import trader.experiments.registry\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True)

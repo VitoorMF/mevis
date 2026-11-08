@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.24 — rascunho |
+| Versão | 0.26 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -158,11 +158,14 @@ trader/
   aggregate/   agregados por minuto de negócios e do livro (doc 06 §5.6)    (sem E/S; mesmo código em lote e ao vivo)
   features/    features point-in-time da V0.2 (doc 04 §5.3)              (sem E/S; mesmo código em pesquisa e operação)
   datasets/    alvo, pontos elegíveis e tabela do dataset (doc 04 §4, §11) (sem E/S)
+  backtest/    simulador, cenários de custo, métricas e baselines (doc 04 §6, §9, §10.1) (sem E/S)
+  experiments/ registro de experimentos em SQLite e contagem de tentativas (doc 04 §11)
   pipeline/    rodada horária: órfãos, compressão, normalização por hora, máscara, exportações,
                réplica e retenção; backfill dos arquivos públicos (doc 06 §7);
                relatório de qualidade (doc 06 §8.3); dados do painel da coleta (doc 06 §8.4);
                publicador da página pública de status (§7.7); agregados por minuto (§7.8);
-               montagem da série de minutos para as features (§5.1); construção dos datasets (§5.2)
+               montagem da série de minutos para as features (§5.1); construção dos datasets (§5.2);
+               execução dos baselines (§5.3)
   public/      página pública de status (HTML estático, sem bibliotecas externas; §7.7)
   ops/         configuração, logs estruturados, StatsD, saúde, estado SQLite
   cli/         comandos
@@ -176,9 +179,9 @@ trader/
 | `zstandard` | Compressão | Só no pipeline. |
 | `pyarrow` | Parquet com `DECIMAL` | Só no pipeline e na pesquisa. |
 | `boto3` | S3 | Só no pipeline e na CLI. No MacBook, `botocore[crt]` (só desenvolvimento) permite usar as credenciais de `aws login`. |
-| `sqlite3` (biblioteca padrão) | Estado operacional | Sem servidor. |
+| `sqlite3` (biblioteca padrão) | Estado operacional; registro de experimentos (§5.3) | Sem servidor. |
 | DuckDB, Polars | Leitura na pesquisa (MacBook) | DEC-20. Os agregados por minuto usam só `pyarrow`, para caber no pacote do host (PD-24, DEC-31). |
-| `numpy` | Cálculo das features (§5.1) | DEC-34. Grupo opcional `pesquisa`, fora do artefato do host até a V0.3 (RNF-029). |
+| `numpy` | Cálculo das features (§5.1) e simulador (§5.3) | DEC-34. Grupo opcional `pesquisa`, fora do artefato do host até a V0.3 (RNF-029). |
 | `pytest`, `ruff`, `mypy` | Testes e qualidade | RNF-020. |
 
 ### 5.1 Features da V0.2 (etapa 2; DEC-34; SRS §4.11)
@@ -236,7 +239,68 @@ S3 (normalized/, derived/) ── cache local ──▶ pipeline/minutes ──�
 - **Saída do comando.** Pontos elegíveis por horizonte e, fora da avaliação final, a fração de alvos positivos entre eles; tempo, pico de memória e o caminho do Parquet.
 - **Testes** (`tests/test_aggregate_trades.py`, `tests/test_minutes.py`, `tests/test_datasets.py`): preço de execução nos limites de 2,5 s e 4 s, empate pelo menor id e independência da ordem; colunas de execução fora de `MINUTES` e recusa da versão 1; fórmula do alvo contra frações exatas, validade pelos minutos de t + 1 a t + 1 + H, preço ausente e fim do período; o alvo só lê os minutos de entrada e saída; pontos elegíveis por trilha; construção com cópia no armazenamento, id e bytes repetidos, mudança de entrada mudando o id, trava do holdout A antes de qualquer leitura, registro de acesso antes da leitura e congelamento da trilha B; comando e CLI sem `numpy`.
 
-**MD-31 — medição da etapa 3 (08/11/2026, MacBook, RNF-030):** período de desenvolvimento da trilha A (23/10/2025 a 22/07/2026: 273 dias de arquivo, 393.120 minutos), com os `minute_trades` da versão 2 refeitos pelo job (§7.8). A primeira construção baixou de novo os 273 arquivos de `minute_trades` (o cache passou de 118 para 128 MB) e levou 2 min 36 s, com pico de 2,7 GiB no processo durante o download. Com o cache cheio, a segunda levou 35 s, com pico de 2,2 GiB, e gerou o mesmo arquivo: mesmo id (`b7a76cda934eb1ee`) e mesmo SHA-256 (CA-07). RNF-030: até 15 min e 4 GiB. Saída: Parquet de 121 MB e 76 colunas em `data/datasets/` e em `derived/datasets/<id>/`, com manifesto de 98 KB; versão do código sem `.dirty` e nenhum aviso. O alvo é válido em todos os minutos menos os 16 (H = 15) e os 61 (H = 60) do fim, cuja saída passaria do período; o último minuto fica sem preço de entrada, porque t + 1 já está fora. Nenhum minuto de negócios inválido no desenvolvimento. Pontos elegíveis: 391.605 (H = 15) e 391.560 (H = 60), 99,6% dos minutos; faltam os 1.499 minutos sem histórico do início (MD-30). Alvos positivos entre os elegíveis, só no desenvolvimento: 11,4% (H = 15) e 23,7% (H = 60); com os custos de doc 04 §4.3, a maioria das janelas não cobre a ida e volta. O holdout não foi lido.
+**MD-31 — medição da etapa 3 (07/11/2026, MacBook, RNF-030):** período de desenvolvimento da trilha A (23/10/2025 a 22/07/2026: 273 dias de arquivo, 393.120 minutos), com os `minute_trades` da versão 2 refeitos pelo job (§7.8). A primeira construção baixou de novo os 273 arquivos de `minute_trades` (o cache passou de 118 para 128 MB) e levou 2 min 36 s, com pico de 2,7 GiB no processo durante o download. Com o cache cheio, a segunda levou 35 s, com pico de 2,2 GiB, e gerou o mesmo arquivo: mesmo id (`b7a76cda934eb1ee`) e mesmo SHA-256 (CA-07). RNF-030: até 15 min e 4 GiB. Saída: Parquet de 121 MB e 76 colunas em `data/datasets/` e em `derived/datasets/<id>/`, com manifesto de 98 KB; versão do código sem `.dirty` e nenhum aviso. O alvo é válido em todos os minutos menos os 16 (H = 15) e os 61 (H = 60) do fim, cuja saída passaria do período; o último minuto fica sem preço de entrada, porque t + 1 já está fora. Nenhum minuto de negócios inválido no desenvolvimento. Pontos elegíveis: 391.605 (H = 15) e 391.560 (H = 60), 99,6% dos minutos; faltam os 1.499 minutos sem histórico do início (MD-30). Alvos positivos entre os elegíveis, só no desenvolvimento: 11,4% (H = 15) e 23,7% (H = 60); com os custos de doc 04 §4.3, a maioria das janelas não cobre a ida e volta. O holdout não foi lido.
+
+### 5.3 Simulador, baselines e registro da V0.2 (etapas 4 e 5; DEC-38; SRS §4.13)
+
+```text
+derived/datasets/<id>/ ── cache local ──▶ pipeline/baselines ──▶ backtest: sinais (B0 a B3) e simulador
+                                                │                   (7 cenários, capital minuto a minuto)
+                                                │                          └──▶ métricas por janela e cenário
+                                                └──▶ experiments: SQLite local e derived/experiments/<id>.*.json
+```
+
+- **Dataset** (`datasets/labels.py`, `pipeline/datasets.py`): ganha as colunas de simulação `close`, `high_prev_60` e `entry_price_stress` (doc 04 §11). A montagem já traz o fechamento dos candles e o preço de execução a 4 s; `high_prev_60` é uma janela de 60 minutos que termina em t − 1, nula se faltar algum candle. Como o formato muda, o dataset da trilha A é refeito (~35 s, MD-31) e ganha outro id; o anterior (`b7a76cda934eb1ee`) fica no S3 e no Mac até ser apagado.
+- **Simulador** (`backtest/simulator.py`, sem E/S, em `numpy`): recebe as colunas do dataset em arrays, o sinal, H, a janela e o cenário. A regra sem sobreposição é sequencial (o próximo sinal depende da última entrada), então um laço em Python percorre só os minutos com sinal; preços, retornos e marcação do capital são vetoriais. As operações não dependem do cenário: o laço roda uma vez por estratégia, janela e horizonte, e cada cenário só troca os preços e os custos.
+- **Capital e métricas** (`backtest/metrics.py`): o capital da janela minuto a minuto (um FLOAT64 por minuto e cenário, ~3 MB por cenário em 9 meses) dá o drawdown e os retornos diários; a lista de operações dá a expectativa, a taxa de acerto e a exposição.
+- **Baselines** (`backtest/baselines.py`): B0 e B3 viram sinais, e B1 é uma operação por janela. B2 sorteia as posições pelo método das posições comprimidas: com M pontos candidatos e N operações, sorteia N posições distintas entre M − (N − 1) · H e soma H vezes a ordem de cada uma (0, 1, 2…). Isso dá uma escolha uniforme entre as combinações sem sobreposição, sem laço de rejeição. O sorteio é sobre a lista dos pontos elegíveis da janela; se ela tiver buracos, o espaçamento em minutos só fica maior. B2 só precisa do retorno total, então não marca o capital, e as 1.000 simulações levam segundos. Gerador `numpy` PCG64, com a semente registrada.
+- **Registro** (`experiments/registry.py`): SQLite em `data/experiments/registry.sqlite` (fora do Git), com as tabelas `executions` e `trials`. Antes de ler o dataset, grava a execução em andamento e envia `derived/experiments/<id>.start.json`; ao terminar, grava o estado, as tentativas e as métricas e envia `<id>.result.json`; o descarte envia `<id>.discard.json`. O id leva a hora UTC com microssegundos, como os registros de acesso ao holdout, então os registros do S3 nunca se substituem, e `trader experiments rebuild` refaz o SQLite a partir deles. A contagem do IS-15 é uma consulta: identificações distintas, com métricas, em execuções de modelo da trilha.
+- **Execução** (`pipeline/baselines.py`, comando `trader baselines`): baixa o dataset do S3 pelo id para o cache local, se ele não estiver no Mac, e confere o SHA-256 do manifesto; recusa o de avaliação final sem a opção (RF-256); registra a execução; calcula B0, B1, B3 e, com `--b2-trades`, B2; mostra as métricas por cenário.
+- **Quem grava no S3:** o MacBook, com o perfil `trader`, em `derived/experiments/`. São registros JSON de poucos KB, com custo desprezível.
+- **Dependências:** nenhuma nova. O `sqlite3` é da biblioteca padrão, e o simulador usa o `numpy` do grupo `pesquisa` (RNF-029); a CLI importa os dois pacotes novos só dentro dos comandos, e o host continua sem eles.
+- **Tamanho e tempo:** uma estratégia nos sete cenários em até 30 s e B2 em até 2 min, no desenvolvimento da trilha A (RNF-031).
+- **Testes previstos:** retorno da operação igual ao do alvo no cenário base; regra sem sobreposição, com o próximo sinal em t + H + 1; operação que sairia da janela; capital e drawdown minuto a minuto contra um cálculo à mão; Sharpe com dias sem posição; os sete cenários com as mesmas operações e o preço de 4 s na latência de 2 s; B1 com uma operação por janela; B2 com a mesma semente, sem sobreposição, só em pontos elegíveis e uniforme num caso pequeno enumerável; B3 contra a regra num caso sintético; recusa do dataset de avaliação final; registro antes de ler o dataset, estados, registros só de acréscimo no S3 e reconstrução do SQLite; contagem de tentativas com repetição, erro e baseline; CLI sem `numpy`.
+
+**Implementação (07/11/2026).** Módulos `backtest/simulator.py` (cenários, janela, colunas do dataset em arrays, regra de operação e capital), `backtest/metrics.py`, `backtest/baselines.py`, `experiments/registry.py` e `pipeline/baselines.py`; comandos `trader baselines` (RF-257) e `trader experiments` (RF-276). Detalhes que o texto acima não fixava:
+
+- **Colunas de simulação.** `close` e `high_prev_60` ficam nulos onde o candle não é válido, e `high_prev_60` também nos 60 primeiros minutos do período. `entry_price_stress` segue o alinhamento de `entry_price`: a linha t traz o preço do minuto t + 1. Os parâmetros do alvo ganham a latência de estresse (2 s) e a coluna desse preço, que entram no id.
+- **Dataset e janela.** O simulador exige uma linha por minuto desde o início de um dia, o que o dataset garante. A janela é de dias UTC inteiros e precisa estar toda dentro do dataset; fora disso, o comando recusa antes de simular.
+- **Saída e cenários.** A saída da decisão t usa `entry_price[t + H]`, o preço do minuto t + 1 + H, como o alvo. A lista de operações é calculada uma vez, e cada cenário só troca os custos e, na latência de 2 s, o preço de 4 s pelo de 2,5 s.
+- **B1.** A decisão é o primeiro minuto da janela com preço de entrada, e a saída é o último minuto com preço até o fim da janela. Com menos de dois minutos com preço, não há operação. O resultado não depende de H.
+- **B2 no comando.** Ainda não há modelo, então o número de operações vem de `--b2-trades`; na etapa 6, virá das operações do modelo em cada dobra. A distribuição é calculada no cenário base, o da comparação do IS-16 (doc 04 §6), e o registro guarda a média e os percentis 5, 50 e 95. Mais operações do que cabem sem sobreposição dão erro.
+- **Tentativas dos baselines.** Cada baseline é uma tentativa no registro:
+  - modelo `nenhuma_operacao`, `comprar_e_segurar`, `entradas_aleatorias` ou `rompimento_60`;
+  - τ nulo;
+  - hiperparâmetros vazios, com duas exceções: B3 guarda a janela de 60 e B2 guarda as operações e as simulações;
+  - semente só em B2.
+
+  As métricas ficam por janela (`AAAA-MM-DD..AAAA-MM-DD`) e por cenário, inclusive os três de sensibilidade, que o comando não mostra. Baselines não contam no IS-15.
+- **Ordem das recusas.** O manifesto é lido primeiro, do Mac ou do S3. Há quatro recusas sem registro: dataset de avaliação final sem a opção (RF-256), a opção com um dataset de desenvolvimento, horizonte que não está no dataset e janela fora do período. Depois do registro de início, qualquer erro fecha a execução com o estado de erro e a mensagem; por exemplo, SHA-256 diferente do manifesto ou B2 que não cabe.
+- **Registros.** Cada JSON também fica em `data/experiments/records/`, e um registro com o mesmo nome nunca é regravado. `rebuild` baixa os registros do S3 para `data/experiments/records-s3/`, monta um SQLite novo ao lado e só então substitui o antigo. Com `--data-dir` sem `--config`, o armazenamento é uma pasta local, o que permite medir e testar sem gravar no S3.
+- **Saída do comando.** Uma linha por baseline em cada cenário relatado (base, taxa BNB, taxa de estresse e estresse), o resumo de B2, o tempo por parte, o pico de memória e o id da execução.
+- **Testes** (`tests/test_backtest.py`, `tests/test_experiments.py`, `tests/test_baselines.py`, `tests/test_datasets.py`): os previstos acima. Também cobrem:
+  - as colunas de simulação contra os candles e o preço de 4 s;
+  - a junção de janelas;
+  - a recusa de operações sobrepostas;
+  - o comando com o dataset baixado do armazenamento e conferido pelo SHA-256;
+  - o erro que fica no registro;
+  - a recusa do dataset de avaliação final antes do registro;
+  - os cinco subcomandos de `trader experiments`, inclusive a reconstrução depois de apagar o SQLite.
+
+**MD-32 — medição das etapas 4 e 5 (07/11/2026, MacBook, RNF-031).** Período: desenvolvimento da trilha A (23/10/2025 a 22/07/2026, 393.120 minutos).
+
+- **Dataset refeito com as colunas de simulação.** Levou 24,7 s com o cache cheio, com pico de 2,6 GiB (RNF-030: 15 min e 4 GiB). Saída: Parquet de 125 MB com 79 colunas. Os pontos elegíveis e os alvos positivos são os de MD-31. `high_prev_60` é nula só nos 60 primeiros minutos, e `entry_price_stress` só no último minuto, como `entry_price`; nenhum preço de estresse foi trocado pelo base (RF-253).
+- **Tempo e memória dos baselines.**
+  - B0 e B1 levaram 0,1 s, e B3 levou 0,1 s, nos sete cenários e em cada horizonte.
+  - B2, com 1.000 simulações, levou 0,1 s com 2.000 operações e 0,9 s com 20.000 operações (H = 15, perto do máximo sem sobreposição).
+  - O comando inteiro levou cerca de 1 s, com pico de ~560 MB no processo.
+
+  RNF-031: 30 s, 2 min e 4 GiB.
+- **Resultados, só do desenvolvimento.**
+  - B1 teve retorno líquido de −38,6% no período, com Sharpe de −1,20 e drawdown de 50,2%: o preço caiu no desenvolvimento.
+  - B3 fez 4.656 operações (H = 15) e 2.780 (H = 60), com expectativa de −22,7 e −23,5 pb por operação. Isso está perto da ida e volta de custos do cenário base (~22 pb), ou seja, o resultado antes dos custos fica perto de zero. Com os juros compostos, o capital termina perto de zero em todos os cenários.
+  - B2 não tem resultado a relatar sem um modelo, porque o número de operações foi arbitrário.
+- **Código sem commit.** A medição usou código sem commit. O dataset (`847e7cf5f2be0e5c`, versão marcada `.dirty`) foi enviado a `derived/datasets/`, mas as execuções usaram um registro e um armazenamento temporários, sem registros em `derived/experiments/`. O dataset oficial e as primeiras execuções registradas no S3 vêm depois do commit, com outro id, porque a versão do código faz parte da identificação.
 
 ---
 
@@ -679,4 +743,6 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.21 | 07/11/2026 | §5.1: implementação da etapa 2 (somas em ordem fixa, disponibilidade dos minutos anteriores, sem aquecimento, saída do comando, testes) e MD-30 (9 meses no MacBook em 11 s, pico de 2,5 GB). |
 | 0.22 | 07/11/2026 | §5.2 aprovado em 07/11/2026 (DEC-37). §5 e §5.2: datasets da etapa 3 (DEC-36): preço de execução nos agregados (versão 2) e refação pelo job sob demanda, alvo e pontos elegíveis, construção e envio ao S3, trava do holdout com registro de acesso, custo. |
 | 0.23 | 07/11/2026 | §5.2: implementação da etapa 3 (preço de execução sem ordem, recusa da versão 1 no alvo, colunas da tabela, id e versão do código, mesmo arquivo byte a byte, manifesto, trava do holdout em duas etapas, testes). |
-| 0.24 | 08/11/2026 | §5.2: MD-31 (dataset do desenvolvimento da trilha A no MacBook em 35 s com o cache cheio, pico de 2,7 GiB, mesmo arquivo ao refazer). §7.8: terceira e quarta execuções (agregados refeitos na versão 2). |
+| 0.24 | 07/11/2026 | §5.2: MD-31 (dataset do desenvolvimento da trilha A no MacBook em 35 s com o cache cheio, pico de 2,7 GiB, mesmo arquivo ao refazer). §7.8: terceira e quarta execuções (agregados refeitos na versão 2). |
+| 0.25 | 07/11/2026 | §5.3 aprovado em 07/11/2026 (DEC-39). §5 e §5.3: simulador, baselines e registro das etapas 4 e 5 (DEC-38): colunas de simulação no dataset, simulador e cenários, capital minuto a minuto, sorteio de B2, registro em SQLite com registros só de acréscimo no S3, comandos e testes previstos. MD-31 e linha 0.24 com a data de Brasília (07/11). |
+| 0.26 | 07/11/2026 | §5.3: implementação das etapas 4 e 5 (colunas de simulação, B1 e B2 no comando, tentativas dos baselines, ordem das recusas, registros locais e reconstrução, testes) e MD-32 (dataset refeito em 25 s; baselines nos sete cenários em cerca de 1 s, B2 com 20.000 operações em 0,9 s, pico de ~560 MB). |

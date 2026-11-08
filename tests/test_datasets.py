@@ -12,6 +12,7 @@ import pyarrow.parquet as pq
 import pytest
 from test_minutes import (
     ARCHIVE_DAY,
+    ARCHIVE_GAP,
     ARCHIVE_START,
     KLINE,
     LIVE_DAY,
@@ -28,11 +29,13 @@ from trader.core.holdout import HoldoutRefused
 from trader.core.timeunits import MINUTE_US
 from trader.datasets.labels import (
     FEE,
+    SIMULATION_COLUMNS,
     SLIPPAGE,
     LabelParams,
     compute_labels,
     dataset_table,
     eligible_points,
+    simulation_columns,
 )
 from trader.features.compute import FAMILIES, FEATURES, FeatureFrame, catalog_id
 from trader.pipeline.datasets import (
@@ -122,13 +125,36 @@ def test_price_column_follows_the_latency() -> None:
     assert LabelParams(latency_ms=2000).price_column == "exec_price_4000ms"
     with pytest.raises(ValueError, match="sem preço de execução"):
         _ = LabelParams(latency_ms=100).price_column
+    assert LabelParams().stress_price_column == "exec_price_4000ms"
     assert LabelParams().to_dict() == {
         "horizons": [15, 60],
         "fee": 0.001,
         "slippage": 0.0001,
         "latency_ms": 500,
+        "stress_latency_ms": 2000,
         "price_column": "exec_price_2500ms",
+        "stress_price_column": "exec_price_4000ms",
     }
+
+
+def test_simulation_columns() -> None:
+    n = 130
+    close = np.arange(n, dtype=float) + 1000
+    high = close + 0.5
+    valid = np.ones(n, bool)
+    valid[100] = False
+    stress = close + 0.25
+    stress[50] = 0.0  # preço não positivo conta como ausente
+    columns = simulation_columns(close, high, valid, stress)
+    assert set(columns) == set(SIMULATION_COLUMNS)
+    assert np.isnan(columns["close"][100]) and columns["close"][99] == 1099
+    previous = columns["high_prev_60"]
+    assert np.isnan(previous[:60]).all(), "menos de 60 minutos anteriores"
+    assert previous[60] == high[:60].max() == 1059.5
+    assert previous[99] == high[39:99].max(), "a máxima não inclui o minuto t"
+    assert np.isnan(previous[101:161]).all(), "o minuto 100 inválido está na janela"
+    entry = columns["entry_price_stress"]
+    assert entry[10] == stress[11] and np.isnan(entry[49]) and np.isnan(entry[n - 1])
 
 
 # ------------------------------------------------------------- pontos e tabela (RF-225, RF-226)
@@ -157,7 +183,8 @@ def test_dataset_table_columns() -> None:
     valid = {family: np.ones(n, bool) for family in FAMILIES}
     price_series = np.linspace(100, 90, n)
     labels = compute_labels(price_series, np.ones(n, bool), LabelParams(horizons=(3, 5)))
-    table = dataset_table(frame_of(valid), labels, "B")
+    simulation = simulation_columns(price_series, price_series, np.ones(n, bool), price_series)
+    table = dataset_table(frame_of(valid), labels, "B", simulation)
     feature_names = [name for name, _ in FEATURES]
     assert table.column_names == [
         "minute_ts_us",
@@ -170,6 +197,9 @@ def test_dataset_table_columns() -> None:
             for h in (3, 5)
             for column in ("exit_price", "net_return", "target", "target_valid", "eligible")
         ),
+        "close",
+        "high_prev_60",
+        "entry_price_stress",
     ]
     target = table["target_h3"].to_pylist()
     assert target[:8] == [False] * 8, "preço caindo: alvo negativo"
@@ -237,6 +267,24 @@ def test_target_comes_from_the_execution_price(tmp_path: Path) -> None:
     assert no_price["entry_price"] is None and not no_price["target_valid_h15"]
     last = table.slice(table.num_rows - 16, 1).to_pylist()[0]
     assert last["target_valid_h15"] is False, "a saída cairia depois do fim do período"
+
+
+def test_simulation_columns_come_from_candles_and_stress_price(tmp_path: Path) -> None:
+    root = build_data(tmp_path / "data")
+    table = pq.read_table(build(root, tmp_path / "out").path)
+    t = ARCHIVE_START + 100 * MINUTE_US
+    row = table.slice(row_of(t), 1).to_pylist()[0]
+    assert row["close"] == pytest.approx(float(price(t)), abs=1e-9)  # DECIMAL → FLOAT64 (RF-212)
+    expected_high = max(price(t - k * MINUTE_US) + 1 for k in range(1, 61))
+    assert row["high_prev_60"] == pytest.approx(float(expected_high), abs=1e-9)
+    assert row["entry_price_stress"] == float(price(t + MINUTE_US) + 1)
+    gap = table.slice(row_of(ARCHIVE_GAP), 61).to_pylist()
+    assert gap[0]["close"] is None, "minuto sem candle"
+    assert all(r["high_prev_60"] is None for r in gap[1:]), "o minuto sem candle está na janela"
+    after = table.slice(row_of(ARCHIVE_GAP + 61 * MINUTE_US), 1).to_pylist()[0]
+    assert after["high_prev_60"] is not None
+    no_price = table.slice(row_of(NO_EXECUTION) - 1, 1).to_pylist()[0]
+    assert no_price["entry_price_stress"] is None
 
 
 def test_rebuilding_gives_the_same_file_and_id(tmp_path: Path) -> None:

@@ -4,8 +4,8 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 01 — PRD |
-| Versão | 0.17 — rascunho |
-| Status | Decisões até DEC-37; aguardando confirmação da conta AWS e revisão final (§19) |
+| Versão | 0.18 — rascunho |
+| Status | Decisões até DEC-39; aguardando confirmação da conta AWS e revisão final (§19) |
 | Data | 23/10/2026 |
 | Responsável pelo produto | *a preencher* |
 | Fonte | [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -573,6 +573,8 @@ O MVP é aceito quando **todos** os critérios abaixo forem atendidos, **indepen
 | DEC-35 | Etapa 2 da V0.2 aprovada | Requisitos das features (SRS v0.10: RF-201 a RF-213, RNF-028, RNF-029), definições exatas das 59 features (doc 04 v1.4, §5.1 a §5.3) e arquitetura do pacote (doc 03 §5.1), aprovados em 07/11/2026. |
 | DEC-36 | Datasets (etapa 3 da V0.2) | Decisões PD-31 a PD-34 (07/11/2026): preço de execução do alvo calculado por minuto a partir dos negócios, como novas colunas de `minute_trades` (primeiro negócio depois de t_d + 0,5 s e + 2 s), com os agregados refeitos pelo job sob demanda; todos os degraus de uma trilha e os baselines B2 e B3 nos mesmos pontos, os válidos no degrau mais alto e com alvo válido; uma tabela por trilha e período, com todas as features e os alvos dos dois horizontes; estudo de robustez de 2023 a 2025 fora da etapa 3, com regra de preço a definir (doc 04 §3.2, §4, §9 e §11; SRS §4.12). |
 | DEC-37 | Etapa 3 da V0.2 aprovada | Requisitos dos datasets e do alvo (SRS v0.11: RF-221 a RF-229, RNF-030), alvo, pontos elegíveis, preço de execução e formato do dataset (doc 04 v1.5), arquitetura (doc 03 §5.2) e esquema versão 2 de `minute_trades` (doc 06 §5.6), aprovados em 07/11/2026. |
+| DEC-38 | Simulador, baselines e registro (etapas 4 e 5 da V0.2) | Decisões PD-35 a PD-38 (07/11/2026): o dataset ganha colunas de simulação (preço de execução da latência de estresse, fechamento e máxima dos 60 minutos anteriores), que os modelos não leem; o cenário de estresse de custos do IS-19 junta taxa de 0,15%, deslizamento de 0,03% e latência de 2 s; as tentativas do IS-15 são as configurações distintas de modelo avaliadas, sem contar repetições, execuções com erro nem baselines; o drawdown é medido com o capital marcado minuto a minuto pelo fechamento. Os dois esclarecimentos de G2 vêm antes de qualquer avaliação do holdout (doc 04 §6, §9, §10 e §11; SRS §4.13). |
+| DEC-39 | Etapas 4 e 5 da V0.2 aprovadas | Requisitos do simulador, dos baselines e do registro de experimentos (SRS v0.12: RF-231 a RF-234, RF-251 a RF-257, RF-271 a RF-276, RNF-031; RF-226 com as colunas de simulação), cenários de custo, métricas, baselines e registro (doc 04 v1.6) e arquitetura (doc 03 §5.3), aprovados em 07/11/2026. |
 
 Permanecem **em aberto**: as pendências de §17.2.
 
@@ -607,6 +609,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | PD-24 a PD-26 | 06/11/2026 | DEC-31 — agregados por minuto (doc 06 §5.6; doc 03 §7.8). |
 | PD-27 a PD-30 | 07/11/2026 | DEC-34 — biblioteca de features (doc 04 §5; SRS §4.11; doc 03 §5.1). |
 | PD-31 a PD-34 | 07/11/2026 | DEC-36 — datasets e alvo (doc 04 §4, §9, §11; SRS §4.12; doc 03 §5.2; doc 06 §5.6). |
+| PD-35 a PD-38 | 07/11/2026 | DEC-38 — simulador, baselines e registro de experimentos (doc 04 §6, §9, §10, §11; SRS §4.13; doc 03 §5.3). |
 
 ---
 
@@ -657,6 +660,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | 0.15 | 06/11/2026 | DEC-33: instância sob demanda passa a c7i-flex.large (plano gratuito). |
 | 0.16 | 07/11/2026 | PD-27 a PD-30 apresentadas e decididas no mesmo dia (DEC-34): biblioteca de features da etapa 2 da V0.2. DEC-35: etapa 2 aprovada. |
 | 0.17 | 07/11/2026 | PD-31 a PD-34 apresentadas e decididas no mesmo dia (DEC-36): datasets e alvo da etapa 3 da V0.2. DEC-37: etapa 3 aprovada. |
+| 0.18 | 07/11/2026 | PD-35 a PD-38 apresentadas e decididas no mesmo dia (DEC-38): simulador, baselines e registro de experimentos das etapas 4 e 5 da V0.2. DEC-39: etapas 4 e 5 aprovadas. |
 
 ---
 

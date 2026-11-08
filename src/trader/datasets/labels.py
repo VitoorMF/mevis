@@ -5,12 +5,18 @@ execução base do minuto t + 1 e saída no do minuto t + 1 + H, com taxa e desl
 contra a operação (DEC-36). Os preços passam de DECIMAL para FLOAT64 só aqui, como nas features
 (RF-212). As colunas do alvo são informação do futuro em relação à decisão: servem para treinar e
 avaliar, nunca como entrada do modelo.
+
+As colunas de simulação (DEC-38; doc 04 §11) servem ao simulador e aos baselines da etapa 4: o
+fechamento do minuto, a máxima dos 60 minutos anteriores (B3) e o preço de execução da latência de
+estresse. Também não são features.
 """
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 
 import numpy as np
 import pyarrow as pa
+from numpy.lib.stride_tricks import sliding_window_view
 
 from trader.aggregate.schema import EXEC_OFFSETS_MS
 from trader.features.compute import DECISION_DELAY_US, FAMILIES, FeatureFrame
@@ -23,6 +29,12 @@ SLIPPAGE = 0.0001
 """Deslizamento por lado: 0,01% (doc 04 §9)."""
 LATENCY_MS = 500
 """Latência de execução base depois do instante de decisão (doc 04 §9)."""
+STRESS_LATENCY_MS = 2000
+"""Latência de execução de estresse (doc 04 §9; DEC-38)."""
+BREAKOUT_WINDOW = 60
+"""Minutos anteriores da máxima do rompimento de B3 (doc 04 §6)."""
+SIMULATION_COLUMNS = ("close", "high_prev_60", "entry_price_stress")
+"""Colunas de simulação do dataset, nessa ordem, no fim da tabela (DEC-38)."""
 
 TRACK_FAMILIES = {"A": FAMILIES[:3], "B": FAMILIES}
 """Famílias do degrau mais alto de cada trilha: B6 na A (sem livro), B7 na B (RF-225)."""
@@ -34,17 +46,31 @@ class LabelParams:
     fee: float = FEE
     slippage: float = SLIPPAGE
     latency_ms: int = LATENCY_MS
+    stress_latency_ms: int = STRESS_LATENCY_MS
 
     @property
     def price_column(self) -> str:
-        """Coluna de `minute_trades` com o preço de execução dessa latência (doc 06 §5.6)."""
-        offset = DECISION_DELAY_US // 1000 + self.latency_ms
-        if offset not in EXEC_OFFSETS_MS:
-            raise ValueError(f"sem preço de execução a {offset} ms do início do minuto")
-        return f"exec_price_{offset}ms"
+        """Coluna de `minute_trades` com o preço de execução da latência base (doc 06 §5.6)."""
+        return _price_column(self.latency_ms)
+
+    @property
+    def stress_price_column(self) -> str:
+        """Coluna de `minute_trades` com o preço de execução da latência de estresse."""
+        return _price_column(self.stress_latency_ms)
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self) | {"horizons": list(self.horizons), "price_column": self.price_column}
+        return asdict(self) | {
+            "horizons": list(self.horizons),
+            "price_column": self.price_column,
+            "stress_price_column": self.stress_price_column,
+        }
+
+
+def _price_column(latency_ms: int) -> str:
+    offset = DECISION_DELAY_US // 1000 + latency_ms
+    if offset not in EXEC_OFFSETS_MS:
+        raise ValueError(f"sem preço de execução a {offset} ms do início do minuto")
+    return f"exec_price_{offset}ms"
 
 
 @dataclass(frozen=True)
@@ -100,6 +126,26 @@ def _ahead(x: np.ndarray, k: int) -> np.ndarray:
     return out
 
 
+def simulation_columns(
+    close: np.ndarray, high: np.ndarray, candle_valid: np.ndarray, stress_price: np.ndarray
+) -> dict[str, np.ndarray]:
+    """Colunas de simulação de uma série contígua (DEC-38; doc 04 §11).
+
+    `close` e `high` vêm dos candles e valem só nos minutos válidos; `high_prev_60` é a máxima de
+    t - 60 a t - 1, nula se faltar algum desses candles. `entry_price_stress` é o preço de execução
+    de estresse do minuto t + 1, como `entry_price` é o da latência base.
+    """
+    n = len(close)
+    close = np.where(candle_valid, close, np.nan)
+    high = np.where(candle_valid, high, np.nan)
+    previous = np.full(n, np.nan)
+    if n > BREAKOUT_WINDOW:
+        windows = sliding_window_view(high, BREAKOUT_WINDOW)  # windows[i] = high[i : i + 60]
+        previous[BREAKOUT_WINDOW:] = windows[: n - BREAKOUT_WINDOW].max(axis=1)  # NaN se faltar
+    stress = _ahead(np.where(stress_price > 0, stress_price, np.nan), 1)
+    return {"close": close, "high_prev_60": previous, "entry_price_stress": stress}
+
+
 def eligible_points(frame: FeatureFrame, labels: Labels, track: str) -> dict[int, np.ndarray]:
     """Por horizonte: válido em todas as famílias do degrau mais alto da trilha e com alvo válido.
 
@@ -108,8 +154,11 @@ def eligible_points(frame: FeatureFrame, labels: Labels, track: str) -> dict[int
     return {h: top & labels.valid[h] for h in labels.valid}
 
 
-def dataset_table(frame: FeatureFrame, labels: Labels, track: str) -> pa.Table:
-    """Uma linha por minuto: features, validade por família e, por horizonte, o alvo (RF-226)."""
+def dataset_table(
+    frame: FeatureFrame, labels: Labels, track: str, simulation: Mapping[str, np.ndarray]
+) -> pa.Table:
+    """Uma linha por minuto: features, validade por família, o alvo por horizonte e as colunas de
+    simulação (RF-226)."""
     table = frame.to_table()
     eligible = eligible_points(frame, labels, track)
     table = table.append_column("entry_price", _floats(labels.entry_price))
@@ -125,6 +174,8 @@ def dataset_table(frame: FeatureFrame, labels: Labels, track: str) -> pa.Table:
         }
         for name, values in columns.items():
             table = table.append_column(name, values)
+    for name in SIMULATION_COLUMNS:
+        table = table.append_column(name, _floats(simulation[name]))
     return table
 
 

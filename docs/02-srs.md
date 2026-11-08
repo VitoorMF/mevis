@@ -4,8 +4,8 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 02 — SRS |
-| Versão | 0.11 — rascunho |
-| Escopo desta versão | **V0.1 (Data Engine) detalhada**, mais os agregados por minuto da etapa 1 da V0.2 (§4.8), as features da etapa 2 (§4.11) e os datasets da etapa 3 (§4.12). O resto da V0.2 e a V0.3 apenas delimitados (§9). |
+| Versão | 0.12 — rascunho |
+| Escopo desta versão | **V0.1 (Data Engine) detalhada**, mais os agregados por minuto da etapa 1 da V0.2 (§4.8), as features da etapa 2 (§4.11), os datasets da etapa 3 (§4.12) e o simulador, os baselines e o registro de experimentos das etapas 4 e 5 (§4.13). O resto da V0.2 e a V0.3 apenas delimitados (§9). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.6; [03 — Architecture](03-architecture.md) v0.2; [06 — Data & Integrations](06-data-integrations.md) v0.2; [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -344,10 +344,34 @@ Alvo, regra de operação e custos estão no doc 04 §4 e §9; formato, identifi
 | RF-223 | Para cada minuto t e cada horizonte H ∈ {15, 60} min, o sistema deve calcular o retorno líquido da operação simulada, com entrada no preço de execução base do minuto t + 1 e saída no do minuto t + 1 + H, taxa f = 0,10% e deslizamento s = 0,01% por lado, contra a operação: r = P_saída · (1 − s) · (1 − f)² / (P_entrada · (1 + s)) − 1. O alvo é y = 1 se r > 0, e y = 0 se não (doc 04 §4.3 e §9). | Must | F-13, doc 04 §4.3 | T |
 | RF-224 | O alvo só é válido se os dois preços existirem e se todos os minutos de negócios de t + 1 a t + 1 + H forem válidos (doc 04 §3.4), incluindo a exceção de 23/10/2026 (RF-203). O cálculo nunca lê minutos depois do fim do período do dataset: um ponto cuja saída cairia depois dele fica sem alvo. | Must | doc 04 §3.4, IS-12 | T |
 | RF-225 | Um minuto t é ponto elegível de uma trilha, num horizonte, se for válido em todas as famílias do degrau mais alto da trilha (B6 na trilha A, B7 na B) e tiver alvo válido nesse horizonte. Os degraus B4 a B7 e os baselines B2 e B3 usam os mesmos pontos elegíveis (DEC-36). | Must | PRD Apêndice B, DEC-36 | T |
-| RF-226 | O dataset deve ser uma tabela por trilha e período, com uma linha por minuto: o início do minuto, t_d, as 59 features e a validade por família (RF-209) e, por horizonte, os preços de entrada e saída, o retorno líquido, o alvo, a validade do alvo e o ponto elegível. A tabela fica num Parquet local e em `derived/datasets/<id>/` no S3, com um manifesto JSON. | Must | F-13, doc 04 §11 | T, I |
+| RF-226 | O dataset deve ser uma tabela por trilha e período, com uma linha por minuto: o início do minuto, t_d, as 59 features e a validade por família (RF-209) e, por horizonte, os preços de entrada e saída, o retorno líquido, o alvo, a validade do alvo e o ponto elegível; e as colunas de simulação, que os modelos não leem: o fechamento do minuto, a máxima dos 60 minutos anteriores e o preço de execução de estresse do minuto t + 1 (doc 04 §11, DEC-38). A tabela fica num Parquet local e em `derived/datasets/<id>/` no S3, com um manifesto JSON. | Must | F-13, doc 04 §11 | T, I |
 | RF-227 | O id do dataset deve ser um resumo SHA-256 da trilha, do período, da identificação do catálogo (RF-209), da versão do código, dos parâmetros do alvo (horizontes, custos, latência) e da lista de arquivos de entrada com seus SHA-256. O manifesto registra esses itens e o SHA-256 do Parquet. Construir de novo com as mesmas entradas e a mesma versão do código deve gerar o mesmo conteúdo (CA-07). Cada experimento cita o id do dataset, o degrau e o horizonte. | Must | F-13, CA-07 | T |
 | RF-228 | O construtor deve recusar os dias do holdout da trilha A (RF-204) e, na trilha B, os minutos a partir do congelamento registrado no código (doc 04 §3.3, regra 4), salvo com a opção da avaliação final. Toda construção com essa opção deve gravar um registro de acesso, só de acréscimo, em `derived/ops/holdout_access/` no S3 e marcar o manifesto como avaliação final; nesse caso, o comando não mostra estatísticas do alvo. | Must | IS-12, doc 04 §3.3 | T |
 | RF-229 | O sistema deveria oferecer o comando `trader dataset --track A\|B --start --end [--allow-holdout]`, que constrói o dataset, grava o Parquet local, envia ao S3 e mostra o id, os pontos elegíveis por horizonte e, fora da avaliação final, a fração de alvos positivos. | Should | F-13 | D |
+
+### 4.13 Simulador, baselines e registro de experimentos (F-14, F-17, F-19) — V0.2, etapas 4 e 5
+
+Regra de operação, custos, cenários, métricas e baselines estão no doc 04 §4.4, §6, §9 e §10.1; registro e contagem de tentativas, no doc 04 §11 (v1.6, DEC-38). As estatísticas dos critérios de G2 (IS-14, IS-15 e ablações) e o treino dos modelos ficam para a etapa 6.
+
+| ID | Requisito | Prior. | Origem | Verif. |
+|---|---|---|---|---|
+| RF-231 | B0 deve produzir zero operações, com retorno, expectativa e drawdown zero, sem Sharpe. | Must | F-14, doc 04 §6 | T |
+| RF-232 | B1 deve fazer uma operação em cada janela avaliada, com decisão no primeiro minuto da janela que tem preço de entrada e saída no preço de execução do último minuto da janela, e capital marcado minuto a minuto (RF-254). | Must | F-14, doc 04 §6 | T |
+| RF-233 | B2 deve sortear, em cada janela avaliada, o mesmo número de operações que o modelo fez nela, em pontos elegíveis (RF-225), de modo uniforme e sem sobreposição (RF-251), 1.000 vezes, com semente registrada, e devolver a distribuição do retorno líquido total; nos resultados do desenvolvimento, cada simulação junta as dobras. Com a mesma semente, o resultado deve ser o mesmo. | Must | F-14, IS-16 | T |
+| RF-234 | B3 deve sinalizar compra no ponto elegível t quando o fechamento de t superar a máxima dos 60 minutos anteriores (t − 60 a t − 1), operando pela regra de RF-251, sem parâmetro ajustado aos dados. | Must | F-14, doc 04 §6 | T |
+| RF-251 | O simulador deve receber o dataset, um horizonte H, uma janela e um sinal por minuto, e operar só nos pontos elegíveis do horizonte cuja saída cai na janela: com sinal no minuto t e sem posição, entra no minuto t + 1 e sai no minuto t + 1 + H; o próximo sinal considerado é o do minuto t + H + 1. Só long/flat, com todo o capital em cada operação (doc 04 §4.4). | Must | F-17, doc 04 §4.4 | T |
+| RF-252 | O retorno líquido de cada operação deve seguir a fórmula de RF-223, com a taxa, o deslizamento e o preço de execução do cenário (RF-253). No cenário base, deve ser igual ao retorno líquido do dataset no mesmo ponto. | Must | F-17, doc 04 §9 | T |
+| RF-253 | O simulador deve calcular cada estratégia nos sete cenários do doc 04 §9 (base; taxa de 0,075%; taxa de 0,15%; sem deslizamento; deslizamento de 0,03%; latência de 2 s; e estresse, que junta taxa de 0,15%, deslizamento de 0,03% e latência de 2 s), com as mesmas operações em todos. Com latência de 2 s, usa o preço de execução de estresse; se ele faltar num minuto que tem o base, usa o base e conta os casos. | Must | F-17, DEC-38 | T |
+| RF-254 | O capital deve começar em 1, com juros compostos, e ser marcado no fechamento de cada minuto pelo valor de liquidação da posição aberta (doc 04 §10.1); um minuto sem fechamento repete a última marca. O drawdown máximo é calculado sobre essa série. | Must | F-17, IS-19, DEC-38 | T |
+| RF-255 | Para cada estratégia, janela e cenário, o simulador deve calcular as métricas do doc 04 §10.1 (expectativa líquida por operação em pontos-base, retorno líquido total, Sharpe dos retornos diários do capital marcado, drawdown máximo, número de operações, taxa de acerto e exposição) e devolver a lista de operações; nos resultados do desenvolvimento, também a junção das dobras. | Must | F-17, doc 04 §10.1 | T |
+| RF-256 | O simulador e os baselines devem recusar um dataset de avaliação final (RF-228) sem a opção da avaliação final; com ela, a execução fica marcada assim no registro (RF-271). | Must | IS-12, RN-013 | T |
+| RF-257 | O sistema deveria oferecer o comando `trader baselines --dataset <id> --horizon 15\|60 [--start --end] [--b2-trades N --seed S]`, que calcula B0, B1 e B3 (e B2, com o número de operações dado) em todos os cenários, registra a execução (RF-271) e mostra as métricas. | Should | F-14, F-17 | D |
+| RF-271 | Toda execução de estratégia (modelo ou baseline) deve ser registrada antes de ler o dataset, com id, autor, data e hora, tipo, trilha, id do dataset, versão do código, degraus, horizontes, modelo, grade, semente, janelas e a marca de avaliação final; o registro de início vai também para `derived/experiments/<id>.start.json` no S3. | Must | F-19, IS-13 | T |
+| RF-272 | Ao terminar, a execução deve registrar o estado (ok, ou erro com a mensagem) e, para cada tentativa, a identificação da configuração e as métricas de RF-255 por cenário e janela; o registro de fim vai para `derived/experiments/<id>.result.json`. Uma execução interrompida continua em andamento no registro. | Must | F-19, IS-13 | T |
+| RF-273 | Nada no registro pode ser apagado ou substituído: descartar uma execução é uma marca com motivo e data (`<id>.discard.json` no S3), e os registros do S3 são só de acréscimo. | Must | F-19, IS-13 | T |
+| RF-274 | A identificação da configuração de uma tentativa deve ser um resumo SHA-256 do degrau, do horizonte, do modelo, dos hiperparâmetros, de τ, da semente, da identificação do catálogo (RF-209) e dos parâmetros do alvo, sem a versão do código, o período e o dataset. O número de tentativas de uma trilha (IS-15) é o de identificações distintas com métricas nas execuções de modelo da trilha (DEC-38). | Must | IS-15, DEC-38 | T |
+| RF-275 | O registro deve ficar num SQLite local e deveria poder ser refeito a partir dos registros de `derived/experiments/`. | Must / Should | F-19, doc 04 §11 | T |
+| RF-276 | O sistema deveria oferecer o comando `trader experiments list\|show\|count\|discard\|rebuild`, que lista as execuções, mostra uma, conta as tentativas por trilha, marca uma execução como descartada e refaz o SQLite a partir do S3. | Should | F-19 | D |
 
 ---
 
@@ -385,6 +409,7 @@ Alvo, regra de operação e custos estão no doc 04 §4 e §9; formato, identifi
 | RNF-028 | Desempenho | Montar a série e calcular as features de 9 meses de minutos (~393 mil) no MacBook em até 10 min, com até 4 GiB de memória no processo [PROPOSTA]. | doc 04 §12 | T, A |
 | RNF-029 | Dependências | O cálculo das features usa `numpy` (DEC-34), num grupo opcional de pesquisa, fora do artefato do host até a V0.3 precisar das features ao vivo; o grupo precisa ter pacotes para macOS ARM64 e Linux ARM64 e x86_64 (RNF-022). | DEC-34, RNF-022 | I |
 | RNF-030 | Desempenho | Construir o dataset do desenvolvimento da trilha A (9 meses) no MacBook em até 15 min, com até 4 GiB de memória no processo, fora o download do cache [PROPOSTA]. | doc 04 §12 | T, A |
+| RNF-031 | Desempenho | No desenvolvimento da trilha A (9 meses), simular uma estratégia num horizonte nos sete cenários em até 30 s e as 1.000 simulações de B2 em até 2 min, no MacBook, com até 4 GiB de memória no processo [PROPOSTA]. | doc 04 §12 | T, A |
 
 ---
 
@@ -534,9 +559,9 @@ Estes requisitos serão escritos em versão futura do SRS, depois dos documentos
 |---|---|---|---|---|
 | V0.2 | Features point-in-time | F-12 | RF-201–RF-219 | **Detalhado em §4.11** (RF-201 a RF-213, v0.10) |
 | V0.2 | Datasets versionados | F-13 | RF-221–RF-229 | **Detalhado em §4.12** (RF-221 a RF-229, v0.11) |
-| V0.2 | Baselines, treinamento e validação | F-14, F-15, F-16 | RF-231–RF-249 | Doc 04 (targets, walk-forward, holdout) |
-| V0.2 | Backtester com custos | F-17 | RF-251–RF-269 | Docs 04 e 05 (custos, modelo de preenchimento) |
-| V0.2 | Ablações, registro e relatórios | F-18, F-19, F-20 | RF-271–RF-289 | Docs 04 e 07 |
+| V0.2 | Baselines, treinamento e validação | F-14, F-15, F-16 | RF-231–RF-249 | **Baselines detalhados em §4.13** (RF-231 a RF-234, v0.12); treino e validação na etapa 6 (doc 04 §7 e §8) |
+| V0.2 | Backtester com custos | F-17 | RF-251–RF-269 | **Detalhado em §4.13** (RF-251 a RF-257, v0.12); o modelo de preenchimento do doc 05 vem depois |
+| V0.2 | Ablações, registro e relatórios | F-18, F-19, F-20 | RF-271–RF-289 | **Registro detalhado em §4.13** (RF-271 a RF-276, v0.12); ablações e relatórios na etapa 6 (docs 04 e 07) |
 | V0.3 | Signal Engine | F-22 | RF-301–RF-309 | Doc 05 |
 | V0.3 | Risk Manager e kill switch | F-23, F-24 | RF-311–RF-329 | Doc 05 (limites) |
 | V0.3 | Execução simulada, testnet e posições | F-25, F-26, F-27 | RF-331–RF-349 | Doc 05 (estados de ordem, reconciliação) |
@@ -563,6 +588,9 @@ Requisitos da V0.1 que já servem às versões seguintes: replay (RF-134) para a
 | F-11 Agregações | RF-171–RF-179, RNF-027 | — | IS-03 |
 | F-12 Features (V0.2) | RF-201–RF-213; RNF-028, RNF-029 | — | IS-11, CA-08 |
 | F-13 Datasets (V0.2) | RF-221–RF-229; RNF-030 | — | IS-12, CA-07 |
+| F-14 Baselines (V0.2) | RF-231–RF-234 | — | IS-16 |
+| F-17 Backtester com custos (V0.2) | RF-251–RF-257; RNF-031 | — | IS-14, IS-19 |
+| F-19 Registro de experimentos (V0.2) | RF-271–RF-276 | — | IS-13, IS-15, CA-11 |
 | Transversal: operação | RF-181–RF-187 | UC-01, UC-07 | — |
 | Transversal: segurança e custo | RN-001, RN-012, RN-015; RNF-013–RNF-017, RNF-023–RNF-025 | — | — |
 
@@ -612,3 +640,4 @@ Nenhuma pendência aberta que afete a V0.1. Resolvidas em 23/10/2026: PD-06 → 
 | 0.9 | 07/11/2026 | Aprovado em 07/11/2026. RF-160: o início de uma coleta sem sessão anterior também é conferido (doc 06 §8.1). |
 | 0.10 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-35). Etapa 2 da V0.2 (DEC-34): §4.11 com RF-201 a RF-213 (features point-in-time), RNF-028 e RNF-029; §9 e §10 atualizados. |
 | 0.11 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-37). Etapa 3 da V0.2 (DEC-36): §4.12 com RF-221 a RF-229 (preço de execução por minuto, alvo, pontos elegíveis, tabela e identificação do dataset, trava do holdout) e RNF-030; §9 e §10 atualizados. |
+| 0.12 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-39). Etapas 4 e 5 da V0.2 (DEC-38): §4.13 com RF-231 a RF-234 (baselines), RF-251 a RF-257 (simulador com custos), RF-271 a RF-276 (registro de experimentos) e RNF-031; RF-226 com as colunas de simulação; §9 e §10 atualizados. |

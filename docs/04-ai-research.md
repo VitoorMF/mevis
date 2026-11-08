@@ -4,9 +4,9 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 04 — AI & Quantitative Research |
-| Versão | 1.5 — aprovado |
+| Versão | 1.6 — aprovado |
 | Escopo desta versão | Método de pesquisa da V0.2: dados e períodos, formulação do problema, features, baselines, modelos, validação, custos, métricas, critérios de G2 a pré-registrar, registro de experimentos e plano de trabalho. |
-| Status | Aprovado em 26/10/2026 (DEC-28); v1.4 aprovada em 07/11/2026 (DEC-35); v1.5 aprovada em 07/11/2026 (DEC-37), com a etapa 3 (DEC-36). Decisões PD-15 a PD-23 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
+| Status | Aprovado em 26/10/2026 (DEC-28); v1.4 aprovada em 07/11/2026 (DEC-35); v1.5 aprovada em 07/11/2026 (DEC-37), com a etapa 3 (DEC-36); v1.6 aprovada em 07/11/2026 (DEC-39), com as etapas 4 e 5 (DEC-38). Decisões PD-15 a PD-23 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
 | Data | 26/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.8; [02 — SRS](02-srs.md) v0.5; [03 — Architecture](03-architecture.md) v0.8; [06 — Data & Integrations](06-data-integrations.md) v0.8 |
 
@@ -153,7 +153,7 @@ e y = 1 se r > 0. A taxa sai do ativo recebido em cada lado, como na Binance: a 
 
 - Só long/flat (DEC-14): entrar comprado ou ficar fora.
 - Saída por tempo: exatamente H minutos depois da entrada.
-- Sem sobreposição: com posição aberta, novos sinais são ignorados.
+- Sem sobreposição: com posição aberta, novos sinais são ignorados. A posição aberta pela decisão do minuto t sai no minuto t + 1 + H, depois da decisão do minuto t + H; o próximo sinal considerado é o do minuto t + H + 1, de modo que nunca há saída e entrada no mesmo instante.
 - Tamanho fixo (todo o capital simulado por operação, sem alavancagem — RN-003). Resultados em percentual; o dimensionamento fica no doc 05.
 - **Pontos elegíveis [DECISÃO] DEC-36:** numa trilha e num horizonte, um minuto só é ponto de decisão se for válido em todas as famílias do degrau mais alto da trilha (B6 na A, B7 na B) e tiver alvo válido. Os degraus B4 a B7 e os baselines B2 e B3 usam os mesmos pontos: a diferença entre degraus vem só da informação a mais (PRD, Apêndice B). No desenvolvimento da trilha A, isso deixa 99,6% dos minutos com features válidas (doc 03, MD-30), antes da validade do alvo.
 
@@ -264,6 +264,13 @@ As famílias são cumulativas: o ponto vale para o degrau B5 se for válido em c
 | B2 | Para cada modelo avaliado: 1.000 simulações com o mesmo número de operações e a mesma duração H, em minutos sorteados entre os pontos de decisão válidos, sem sobreposição. Compara-se o resultado do modelo com a distribuição. |
 | B3 | **Rompimento de 60 min:** entra comprado quando o fechamento do minuto supera a máxima dos 60 minutos anteriores; sai depois de H minutos. Sem parâmetros ajustados aos dados. Representa a análise técnica de rompimento que motivou o projeto (PRD §2.1). |
 
+**Detalhes (v1.6, etapa 4).** Todos os baselines passam pelo simulador de §9, com os mesmos cenários de custo, e são calculados em cada janela avaliada (§10.1): cada dobra de teste do walk-forward e o holdout.
+
+- **B0:** nenhuma operação; retorno, expectativa e drawdown zero. O Sharpe não se aplica (desvio zero): o IS-16 compara com B0 só o resultado.
+- **B1:** uma operação por janela, com decisão no primeiro minuto da janela que tem preço de entrada e saída no preço de execução do último minuto da janela. O capital é marcado minuto a minuto como nas outras estratégias (§10.1), e é dele que sai o Sharpe de B1.
+- **B2:** em cada janela, o mesmo número de operações que o modelo fez nela, com as decisões sorteadas de modo uniforme entre os pontos elegíveis, sem sobreposição (§4.4). Nos resultados do desenvolvimento, cada simulação sorteia cada dobra com o número de operações do modelo nela e junta as dobras. A distribuição é a do retorno líquido total, no mesmo cenário da comparação (no IS-16, o base), com a semente registrada (§11). Se o modelo não operou, B2 é zero.
+- **B3:** sinal no ponto elegível t quando c_t é maior que a máxima de h de t − 60 a t − 1 (coluna `high_prev_60`, §11), com a regra de operação de §4.4. Não há parâmetro ajustado aos dados.
+
 ---
 
 ## 7. Modelos
@@ -322,6 +329,20 @@ Custo base por operação completa: ~0,22%. Toda estratégia (B1 a B7) usa o mes
 
 **Preço de execução [DECISÃO] DEC-36.** Uma decisão em t_d = fim do minuto t + 2 s chega à corretora em t_d + latência, ou seja, no início do minuto t + 1 mais 2,5 s (base) ou 4 s (estresse). O preço é o do primeiro negócio com `trade_ts_us` a partir desse instante, calculado por minuto nos agregados (`minute_trades`, doc 06 §5.6) a partir dos negócios brutos; sem negócio até o fim do minuto, o preço fica nulo e o ponto não tem alvo. Vale para o alvo (§4.3) e para o simulador da etapa 4. Os dados ao vivo usam o mesmo horário da corretora (`trade_ts_us`), não o de recebimento.
 
+**Cenários [DECISÃO] DEC-38.** O simulador (etapa 4) calcula cada estratégia nos cenários abaixo. Os sinais e as operações são os mesmos em todos: o modelo decide com o dataset, e só os preços e os custos mudam.
+
+| Cenário | Taxa por lado | Deslizamento por lado | Latência | No relatório |
+|---|---|---|---|---|
+| Base | 0,10% | 0,01% | 0,5 s | Sempre |
+| Taxa com BNB | 0,075% | 0,01% | 0,5 s | Sempre |
+| Taxa de estresse | 0,15% | 0,01% | 0,5 s | Sempre |
+| Sem deslizamento | 0,10% | 0 | 0,5 s | Sensibilidade |
+| Deslizamento alto | 0,10% | 0,03% | 0,5 s | Sensibilidade |
+| Latência de 2 s | 0,10% | 0,01% | 2 s | Sensibilidade |
+| **Estresse** | 0,15% | 0,03% | 2 s | Sempre; é o cenário do IS-19 |
+
+No estresse, o custo por operação completa é de ~0,36%, mais o efeito da latência. Com latência de 2 s, os preços vêm da coluna `entry_price_stress` (§11). Se faltar o preço de 4 s num minuto que tem o de 2,5 s, a operação usa o de 2,5 s e o relatório conta os casos; no desenvolvimento da trilha A não há nenhum (393.120 minutos conferidos em 07/11/2026). No cenário base, o retorno de cada operação é exatamente o retorno líquido do alvo (§4.3).
+
 Ordens a mercado (taker) são a hipótese conservadora; executar como maker (ordem limitada) reduziria a taxa, mas com risco de não ser executado. Esse modelo de preenchimento é do doc 05 e deve ser o mesmo do paper trading (PP-05); este documento será revisto quando o doc 05 existir.
 
 ---
@@ -333,6 +354,15 @@ Ordens a mercado (taker) são a hipótese conservadora; executar como maker (ord
 - **Financeiras:** expectativa líquida por operação (em pontos-base); retorno líquido total; Sharpe a partir de retornos diários (anualizado por √365); drawdown máximo; número de operações; taxa de acerto; exposição (fração do tempo posicionado).
 - **Diagnósticas:** AUC e log loss do classificador; importância das features. Não decidem nada sozinhas.
 - **Por subperíodo:** cada dobra do walk-forward separadamente (IS-18).
+
+**Definições (v1.6, etapa 4):**
+
+- **Janela:** dias UTC inteiros, como uma dobra de teste ou o holdout. Uma operação só entra numa janela se a saída também cair nela; assim cada janela é independente, e a junção das dobras não conta nada duas vezes.
+- **Capital:** começa em 1, e cada operação usa todo o capital (§4.4), com juros compostos. **[DECISÃO] DEC-38:** com posição aberta, o capital é marcado no fechamento de cada minuto pelo valor de liquidação, o que sobraria vendendo naquele preço com os custos: capital na entrada × c_k · (1 − s) · (1 − f)² / (P_entrada · (1 + s)). Na saída vale o preço de execução, e o capital passa a ser o realizado. Um minuto sem fechamento repete a última marca.
+- **Drawdown máximo:** a maior queda desse capital em relação ao maior valor anterior, minuto a minuto.
+- **Retornos diários:** variação do capital marcado entre os fins de dias UTC consecutivos da janela; dias sem posição têm retorno zero e entram na conta. Sharpe = média / desvio × √365.
+- **Expectativa líquida por operação:** média dos retornos líquidos das operações, em pontos-base. **Taxa de acerto:** fração das operações com retorno líquido > 0. **Exposição:** operações × H / minutos da janela.
+- **Estatísticas dos critérios de G2** (bootstrap do IS-14, DSR do IS-15 e comparações das ablações): entram na etapa 6, a primeira que as usa. O registro (§11) já guarda o que o DSR precisa.
 
 ### 10.2 Critérios de G2 [DECISÃO] PD-21 — pré-registrados em 26/10/2026
 
@@ -349,17 +379,25 @@ Um modelo passa em G2 se, **no holdout**, atender a todos:
 
 As ablações (H-01 a H-03) comparam degraus vizinhos pela diferença de expectativa líquida por operação e de Sharpe, com intervalo de confiança por bootstrap pareado nos mesmos dias. Ganho incremental = limite inferior do intervalo acima de zero.
 
+**Esclarecimentos de 07/11/2026 [DECISÃO] DEC-38**, antes de qualquer avaliação do holdout, como prevê o parágrafo seguinte:
+
+- **IS-15:** o número de tentativas é o de configurações distintas de modelo avaliadas na trilha (§11). Repetir uma configuração não soma; execuções que terminaram com erro, sem métricas, e os baselines não contam.
+- **IS-19:** o cenário de estresse de custos junta taxa de 0,15%, deslizamento de 0,03% e latência de 2 s (§9), e o drawdown é o do capital marcado minuto a minuto (§10.1).
+
 Os critérios estão congelados desde 26/10/2026 (commit que registra esta versão). Alterá-los depois de qualquer avaliação de holdout invalida a avaliação (RN-013); qualquer mudança antes disso precisa de nova aprovação e fica no histórico.
 
 ---
 
 ## 11. Registro de experimentos e versionamento de datasets
 
-- **Dataset** (F-13) [DECISÃO] DEC-36: uma tabela por trilha e período, com uma linha por minuto: as 59 features, a validade por família e, para os dois horizontes, preços de entrada e saída, retorno líquido, alvo, validade do alvo e ponto elegível (§4.4). Identificada por um resumo (hash) de trilha, período, catálogo de features, versão do código, parâmetros do alvo e lista de arquivos de entrada com seus SHA-256. Gravada em Parquet em `derived/datasets/<id>/` com um manifesto JSON; reconstruível a partir dos dados normalizados e dos agregados (CA-07). Cada experimento escolhe nela as colunas do degrau e os pontos elegíveis do horizonte, e registra o id do dataset, o degrau e o horizonte. Uma tabela só, em vez de uma por degrau e horizonte, evita repetir os mesmos dados (~110 MB no desenvolvimento da trilha A) e garante que todos os degraus vejam os mesmos minutos.
+- **Dataset** (F-13) [DECISÃO] DEC-36: uma tabela por trilha e período, com uma linha por minuto: as 59 features, a validade por família e, para os dois horizontes, preços de entrada e saída, retorno líquido, alvo, validade do alvo e ponto elegível (§4.4). Identificada por um resumo (hash) de trilha, período, catálogo de features, versão do código, parâmetros do alvo e lista de arquivos de entrada com seus SHA-256. Gravada em Parquet em `derived/datasets/<id>/` com um manifesto JSON; reconstruível a partir dos dados normalizados e dos agregados (CA-07). Cada experimento escolhe nela as colunas do degrau e os pontos elegíveis do horizonte, e registra o id do dataset, o degrau e o horizonte. Uma tabela só, em vez de uma por degrau e horizonte, evita repetir os mesmos dados (~110 MB no desenvolvimento da trilha A) e garante que todos os degraus vejam os mesmos minutos. **Colunas de simulação [DECISÃO] DEC-38:** `close` (fechamento c_t do candle), `high_prev_60` (máxima de h de t − 60 a t − 1, nula se faltar algum desses candles) e `entry_price_stress` (preço de execução a 4 s do minuto t + 1, para a latência de 2 s de §9). Servem ao simulador e aos baselines; os modelos não as leem, porque não são features. O preço de saída de um horizonte H é o de entrada H minutos depois (o mesmo minuto t + 1 + H), então não precisa de coluna própria.
 - **Acesso ao holdout:** construir um dataset com a opção da avaliação final grava um registro, só de acréscimo, em `derived/ops/holdout_access/`; o manifesto do dataset fica marcado como avaliação final.
 - **Experimento** (F-19): toda execução recebe um id e registra, **antes** de rodar, trilha, degrau, horizonte, modelo, grade, semente, dataset e commit; ao terminar, as métricas. Execuções descartadas, com erro ou repetidas continuam no registro (IS-13).
-- O número de tentativas por trilha, usado no IS-15, é a contagem do registro.
-- Armazenamento: SQLite local no MacBook, exportado para `derived/experiments/` no S3 a cada execução. Sem MLflow ou serviços externos (PP-07).
+  - Uma execução avalia uma ou mais **tentativas**: cada configuração de degrau, horizonte, modelo, hiperparâmetros, τ e semente, com o catálogo de features e os parâmetros do alvo. A identificação da configuração é um resumo SHA-256 desses itens, sem a versão do código, o período e o dataset: a mesma configuração refeita depois de corrigir um defeito, ou em outro período, é a mesma tentativa.
+  - Os estados da execução são "em andamento" (gravado antes de ler o dataset), "ok" e "erro" (com a mensagem). "Descartada" é uma marca posterior, com motivo, que não apaga nada.
+  - Os baselines também são registrados, como execuções do tipo baseline.
+- **Contagem do IS-15 [DECISÃO] DEC-38:** o número de tentativas de uma trilha é o de identificações de configuração distintas, com métricas, nas execuções de modelo da trilha. Execuções com erro e baselines ficam no registro, mas não contam.
+- Armazenamento: SQLite local no MacBook, exportado para `derived/experiments/` no S3 a cada execução. Sem MLflow ou serviços externos (PP-07). Cada execução grava `<id>.start.json` antes de rodar, `<id>.result.json` ao terminar e `<id>.discard.json` se for descartada; nada é substituído, e o SQLite pode ser refeito a partir desses registros.
 
 ---
 
@@ -388,7 +426,7 @@ Os critérios estão congelados desde 26/10/2026 (commit que registra esta vers�
 | 3 | Preço de execução por minuto nos agregados, alvo, construtor de datasets versionados e trava do holdout (F-13, §3.3, §4.3, §9) | 2 |
 | 4 | Simulador de operações com custos e baselines B0 a B3 (F-14, F-17) | 3 |
 | 5 | Registro de experimentos (F-19) | 3 |
-| 6 | Trilha A: walk-forward de B4 a B6, ablações, relatório de desenvolvimento | 4, 5 |
+| 6 | Trilha A: walk-forward de B4 a B6, ablações, estatísticas dos critérios de G2 (IS-14, IS-15), relatório de desenvolvimento | 4, 5 |
 | 7 | Trilha A: avaliação única do holdout | 6 e critérios congelados |
 | 8 | Trilha B: desenvolvimento com B0 a B7 | G1 e ≥ 8 semanas de livro (por volta de 20/12/2026) |
 | 9 | Trilha B: congelamento, coleta do holdout (6 semanas) e avaliação única | 8 |
@@ -424,6 +462,7 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | Requisitos RF-201 a RF-289 | SRS, antes de cada etapa: RF-201 a RF-213 (etapa 2, features) no SRS v0.10; RF-221 a RF-229 (etapa 3, datasets) no SRS v0.11 |
 | Comparar os degraus de uma trilha nos mesmos pontos | **Resolvido em 07/11/2026 (DEC-36):** todos usam os pontos válidos no degrau mais alto da trilha e com alvo válido (§4.4) |
 | Regra do preço de execução no estudo de robustez de 2023 a 2025, que só tem candles (§3.2) | Quando o estudo for planejado, depois dos resultados da trilha A (DEC-36) |
+| Como o DSR (IS-15) estima a variância dos Sharpe entre as tentativas, já que hiperparâmetros e τ são escolhidos na validação interna (§8.2) | Etapa 6, antes de rodar os modelos |
 
 ---
 
@@ -456,3 +495,4 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | 1.3 | 06/11/2026 | §12 e §15: c7g recusado pelo plano gratuito na primeira execução; instância passa a c7i-flex.large (DEC-33); tempo da primeira execução medido. Método sem mudança. |
 | 1.4 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-35), com os requisitos da etapa 2. DEC-34: §5.1, janelas fixas e valor indefinido tornando o ponto inválido; §5.2, ajustes do catálogo (desequilíbrio assinado relativo ao volume de 24 h, taxa de chegada fora de B6, janelas que faltavam); §5.3, definições exatas das 59 features, minuto válido, disponibilidade e ponto válido; §12, `numpy`. |
 | 1.5 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-37), com os requisitos da etapa 3. DEC-36: §4.3, cálculo exato do retorno líquido e validade do alvo; §4.4, pontos elegíveis iguais para todos os degraus da trilha; §9, taxa verificada e preço de execução por minuto a partir dos negócios; §11, uma tabela por trilha e período e registro de acesso ao holdout; §3.2 e §15, regra de preço do estudo de robustez adiada; §13, etapa 3 atualizada. |
+| 1.6 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-39), com os requisitos das etapas 4 e 5. DEC-38: §9, cenários de custo, com o de estresse juntando taxa, deslizamento e latência; §10.1, capital marcado minuto a minuto; §10.2, esclarecimentos do IS-15 (configurações distintas) e do IS-19 (cenário de estresse e drawdown), antes de qualquer avaliação do holdout; §11, colunas de simulação no dataset e contagem de tentativas. Também: §4.4, momento do próximo sinal; §6, detalhes dos baselines; §10.1, janela e definições das métricas; §11, detalhes do registro; §13 e §15, estatísticas de G2 e variância do DSR na etapa 6. |

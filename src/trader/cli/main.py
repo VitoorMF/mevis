@@ -1,6 +1,6 @@
 """Linha de comando: `collect`, `collector-ready`, `status`, `pipeline`, `reconcile`, `backfill`,
-`aggregates`, `features`, `dataset`, `quality`, `dashboard-data`, `status-publisher` e `smoke`
-(RF-181 a RF-187, RF-213, RF-229)."""
+`aggregates`, `features`, `dataset`, `baselines`, `experiments`, `quality`, `dashboard-data`,
+`status-publisher` e `smoke` (RF-181 a RF-187, RF-213, RF-229, RF-257, RF-276)."""
 
 import argparse
 import asyncio
@@ -57,11 +57,15 @@ PIPELINE_COMMANDS = (
     "aggregates",
     "features",
     "dataset",
+    "baselines",
+    "experiments",
     "quality",
     "dashboard-data",
     "status-publisher",
 )
 """Comandos configurados pela tabela `[pipeline]`."""
+REGISTRY = Path("data/experiments/registry.sqlite")
+"""Registro de experimentos no MacBook, fora do Git (doc 03 §5.3)."""
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -152,6 +156,38 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="só na avaliação final: permite o holdout e grava o registro de acesso (RF-228)",
     )
 
+    baselines = commands.add_parser(
+        "baselines", help="baselines B0 a B3 de um dataset, em todos os cenários (RF-257)"
+    )
+    baselines.add_argument("--config", type=Path, help="TOML com replica_s3_bucket (S3)")
+    baselines.add_argument("--data-dir", type=Path, help="diretório de dados (sem S3)")
+    baselines.add_argument("--replica-dir", type=Path, help="réplica local (desenvolvimento)")
+    baselines.add_argument("--dataset", required=True, help="id do dataset (RF-227)")
+    baselines.add_argument("--horizon", required=True, type=int, help="H em minutos (15 ou 60)")
+    baselines.add_argument("--start", type=date.fromisoformat, help="1º dia da janela")
+    baselines.add_argument("--end", type=date.fromisoformat, help="último dia da janela")
+    baselines.add_argument("--b2-trades", type=int, help="número de operações sorteadas no B2")
+    baselines.add_argument("--seed", type=int, default=0, help="semente do B2")
+    baselines.add_argument(
+        "--datasets-dir", type=Path, default=Path("data/datasets"), help="pasta dos datasets"
+    )
+    baselines.add_argument("--registry", type=Path, default=REGISTRY, help="SQLite do registro")
+    baselines.add_argument(
+        "--allow-holdout",
+        action="store_true",
+        help="só na avaliação final: aceita um dataset de avaliação final (RF-256)",
+    )
+
+    experiments = commands.add_parser("experiments", help="registro de experimentos (RF-276)")
+    experiments.add_argument("action", choices=("list", "show", "count", "discard", "rebuild"))
+    experiments.add_argument("execution_id", nargs="?", help="id da execução (show, discard)")
+    experiments.add_argument("--track", choices=("A", "B"), help="filtra por trilha")
+    experiments.add_argument("--reason", help="motivo do descarte")
+    experiments.add_argument("--config", type=Path, help="TOML com replica_s3_bucket (S3)")
+    experiments.add_argument("--data-dir", type=Path, help="diretório de dados (sem S3)")
+    experiments.add_argument("--replica-dir", type=Path, help="réplica local (desenvolvimento)")
+    experiments.add_argument("--registry", type=Path, default=REGISTRY, help="SQLite do registro")
+
     quality = commands.add_parser(
         "quality", help="relatório de qualidade de um período (doc 06 §8.3)"
     )
@@ -236,6 +272,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_features(pipeline_config, args)
     if args.command == "dataset":
         return run_dataset(pipeline_config, args)
+    if args.command == "baselines":
+        return run_baselines(pipeline_config, args)
+    if args.command == "experiments":
+        return run_experiments(pipeline_config, args)
     if args.command == "quality":
         return quality_report(pipeline_config, args.start, args.end, args.json)
     if args.command == "dashboard-data":
@@ -651,6 +691,150 @@ def run_dataset(config: PipelineConfig, args: argparse.Namespace) -> int:
         print(f"aviso: {warning}")
     print(f"tempo: {time.monotonic() - began:.1f} s · pico de memória: {peak_mb:.0f} MB")
     print(f"→ {built.path} e derived/datasets/{built.dataset_id}/")
+    return 0
+
+
+def _research_store(config: PipelineConfig) -> LocalDirectoryStore | S3ObjectStore:
+    """Onde ficam os datasets e os registros: o S3 do projeto ou, sem ele, um diretório."""
+    if config.replica_s3_bucket:
+        import boto3  # só o pipeline e a CLI usam o SDK da AWS (ADR-03)
+
+        client = boto3.session.Session(region_name=config.aws_region).client("s3")
+        return S3ObjectStore(client, config.replica_s3_bucket)
+    return LocalDirectoryStore(config.replica_dir or config.data_dir)
+
+
+def _who() -> str:
+    import getpass
+    import socket
+
+    return f"{getpass.getuser()}@{socket.gethostname()}"
+
+
+def _peak_mb() -> float:
+    import resource
+
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak / (1 << 20 if sys.platform == "darwin" else 1 << 10)
+
+
+def run_baselines(config: PipelineConfig, args: argparse.Namespace) -> int:
+    """Baselines B0 a B3 de um dataset, com registro (doc 03 §5.3; RF-257). O `numpy` só é
+    importado aqui (RNF-029)."""
+    try:
+        from trader.backtest.simulator import REPORTED
+        from trader.experiments.registry import Registry
+        from trader.pipeline.baselines import BaselineRequest
+        from trader.pipeline.baselines import run_baselines as run
+        from trader.pipeline.datasets import code_version
+    except ImportError as exc:
+        print(f"falta o grupo de pesquisa (numpy): {exc}", file=sys.stderr)
+        return 2
+
+    began = time.monotonic()
+    store = _research_store(config)
+    code = code_version()
+    if code.endswith(".dirty"):
+        print(f"aviso: código com mudanças sem commit ({code})", file=sys.stderr)
+    request = BaselineRequest(
+        args.dataset,
+        args.horizon,
+        args.start,
+        args.end,
+        args.b2_trades,
+        args.seed,
+        args.allow_holdout,
+    )
+    with Registry(args.registry, store) as registry:
+        try:
+            report = run(
+                request,
+                datasets_dir=args.datasets_dir,
+                fetcher=store,
+                registry=registry,
+                code=code,
+                who=_who(),
+                clock=lambda: datetime.now(UTC),
+            )
+        except HoldoutRefused as exc:
+            print(f"recusado: {exc}", file=sys.stderr)
+            return 2
+        except (ValueError, StorageError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    print(
+        f"execução {report.execution_id} · dataset {args.dataset} (trilha {report.track})"
+        f" · H = {args.horizon} min · {report.window.label}"
+    )
+    header = "operações  expect. (pb)  retorno  Sharpe  drawdown  acerto  exposição"
+    print(f"{'':22}{header}")
+    for rung, by_scenario in report.metrics.items():
+        for name in REPORTED:
+            m = by_scenario[name]
+            sharpe = "—" if m.sharpe is None else f"{m.sharpe:6.2f}"
+            hit = "—" if m.hit_rate is None else f"{m.hit_rate:.1%}"
+            print(
+                f"{rung} {name:<18} {m.trades:9d} {m.expectancy_bps:12.1f} "
+                f"{m.total_return:8.2%} {sharpe:>7} {m.max_drawdown:9.2%} {hit:>7} "
+                f"{m.exposure:9.1%}"
+            )
+    b2 = report.b2_summary()
+    if b2 is not None:
+        print(
+            f"B2 ({args.b2_trades} operações, {b2['simulations']:.0f} simulações, semente"
+            f" {args.seed}, base): retorno total p5 {b2['p05']:.2%} · mediana {b2['p50']:.2%}"
+            f" · p95 {b2['p95']:.2%}"
+        )
+    print("sensibilidade (sem deslizamento, deslizamento alto, latência de 2 s): no registro")
+    parts = " · ".join(f"{name} {seconds:.1f} s" for name, seconds in report.seconds.items())
+    print(
+        f"tempo: {time.monotonic() - began:.1f} s ({parts}) · pico de memória: {_peak_mb():.0f} MB"
+    )
+    print(f"→ {args.registry} e derived/experiments/{report.execution_id}.*.json")
+    return 0
+
+
+def run_experiments(config: PipelineConfig, args: argparse.Namespace) -> int:
+    """Consulta e manutenção do registro de experimentos (RF-276). Não usa `numpy`."""
+    from trader.experiments.registry import EXPERIMENTS, Registry, rebuild
+
+    store = _research_store(config)
+    if args.action == "rebuild":
+        downloads = args.registry.parent / "records-s3"
+        records = []
+        for key in store.list_keys(EXPERIMENTS + "/"):
+            local = downloads / key.rsplit("/", 1)[1]
+            store.fetch(key, local)
+            records.append(json.loads(local.read_text()))
+        with rebuild(args.registry, records, store) as registry:
+            print(
+                f"registro refeito com {len(records)} registros: {len(registry.executions())}"
+                " execuções"
+            )
+        return 0
+    with Registry(args.registry, store) as registry:
+        try:
+            if args.action == "list":
+                for row in registry.executions(args.track):
+                    mark = " (descartada)" if row["discarded_at"] else ""
+                    print(
+                        f"{row['id']}  {row['kind']:<8} trilha {row['track']}  {row['status']:<7}"
+                        f" dataset {row['dataset_id']}{mark}"
+                    )
+            elif args.action == "count":
+                for track in [args.track] if args.track else ["A", "B"]:
+                    print(f"trilha {track}: {registry.count(track)} tentativas (IS-15)")
+            elif args.execution_id is None:
+                print(f"{args.action} precisa do id da execução", file=sys.stderr)
+                return 2
+            elif args.action == "show":
+                print(json.dumps(registry.show(args.execution_id), indent=1, ensure_ascii=False))
+            else:
+                registry.discard(args.execution_id, args.reason or "", datetime.now(UTC))
+                print(f"{args.execution_id} descartada: {args.reason}")
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
     return 0
 
 
