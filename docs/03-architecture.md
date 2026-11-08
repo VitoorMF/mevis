@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.23 — rascunho |
+| Versão | 0.24 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -236,6 +236,8 @@ S3 (normalized/, derived/) ── cache local ──▶ pipeline/minutes ──�
 - **Saída do comando.** Pontos elegíveis por horizonte e, fora da avaliação final, a fração de alvos positivos entre eles; tempo, pico de memória e o caminho do Parquet.
 - **Testes** (`tests/test_aggregate_trades.py`, `tests/test_minutes.py`, `tests/test_datasets.py`): preço de execução nos limites de 2,5 s e 4 s, empate pelo menor id e independência da ordem; colunas de execução fora de `MINUTES` e recusa da versão 1; fórmula do alvo contra frações exatas, validade pelos minutos de t + 1 a t + 1 + H, preço ausente e fim do período; o alvo só lê os minutos de entrada e saída; pontos elegíveis por trilha; construção com cópia no armazenamento, id e bytes repetidos, mudança de entrada mudando o id, trava do holdout A antes de qualquer leitura, registro de acesso antes da leitura e congelamento da trilha B; comando e CLI sem `numpy`.
 
+**MD-31 — medição da etapa 3 (08/11/2026, MacBook, RNF-030):** período de desenvolvimento da trilha A (23/10/2025 a 22/07/2026: 273 dias de arquivo, 393.120 minutos), com os `minute_trades` da versão 2 refeitos pelo job (§7.8). A primeira construção baixou de novo os 273 arquivos de `minute_trades` (o cache passou de 118 para 128 MB) e levou 2 min 36 s, com pico de 2,7 GiB no processo durante o download. Com o cache cheio, a segunda levou 35 s, com pico de 2,2 GiB, e gerou o mesmo arquivo: mesmo id (`b7a76cda934eb1ee`) e mesmo SHA-256 (CA-07). RNF-030: até 15 min e 4 GiB. Saída: Parquet de 121 MB e 76 colunas em `data/datasets/` e em `derived/datasets/<id>/`, com manifesto de 98 KB; versão do código sem `.dirty` e nenhum aviso. O alvo é válido em todos os minutos menos os 16 (H = 15) e os 61 (H = 60) do fim, cuja saída passaria do período; o último minuto fica sem preço de entrada, porque t + 1 já está fora. Nenhum minuto de negócios inválido no desenvolvimento. Pontos elegíveis: 391.605 (H = 15) e 391.560 (H = 60), 99,6% dos minutos; faltam os 1.499 minutos sem histórico do início (MD-30). Alvos positivos entre os elegíveis, só no desenvolvimento: 11,4% (H = 15) e 23,7% (H = 60); com os custos de doc 04 §4.3, a maioria das janelas não cobre a ida e volta. O holdout não foi lido.
+
 ---
 
 ## 6. Fluxos principais
@@ -445,6 +447,11 @@ MacBook: scripts/run-job.sh aggregates --start AAAA-MM-DD --end AAAA-MM-DD [--ve
   - **Volume:** 338 horas, 41.723.267 negócios e 676 arquivos (negócios e livro).
   - **Memória:** pico de 509 MB por processo.
   - **Conferido no MacBook:** SHA-256 e soma dos negócios iguais aos do manifesto. Contra os candles de 1 min recebidos ao vivo, 20.236 minutos comparados, inclusive os ids de negócio, e um único minuto diverge: 23/10/2026 22:44 UTC, o primeiro da coleta. O coletor começou às 22:44:11 e a máscara marca o minuto como `ok`, embora faltem os negócios dos primeiros 11 s (170 de 301). É um defeito da máscara da V0.1 (doc 06 §13), não dos agregados.
+- **Terceira e quarta execuções em 07/11/2026** (18:27, horário de Brasília; versão `0.1.0.dev0-1a18d3e`, a mesma do host), lançadas juntas para refazer os `minute_trades` na versão 2, com o preço de execução (§5.2):
+  - **Desenvolvimento** (job `aggregates-20261107T212712Z`, 23/10/2025 a 22/07/2026): 273 dias e 1.146.828.296 negócios, os mesmos da primeira execução. ~10 min de instância e 458 s de processamento (376 s na primeira; a diferença é o preço de execução), com pico de 505 MB por processo e o mesmo aviso da fronteira com o holdout.
+  - **Horas ao vivo** (job `aggregates-20261107T212716Z`, 23/10 a 07/11/2026): 359 horas, 42.306.881 negócios e 718 arquivos (negócios e livro). ~5 min de instância e 200 s de processamento, com pico de 547 MB por processo.
+  - **Custo:** ~US$ 0,02 no total.
+  - **Conferido no MacBook:** os 632 arquivos de `minute_trades` do S3 foram regravados depois do lançamento. Nas amostras (15/03/2026, de arquivo, e 05/11/2026 às 14h UTC, ao vivo): versão 2, nenhum minuto sem preço de execução e horários a partir de 2,500 s e 4,000 s. O pipeline do host já grava as horas novas na versão 2 (conferidas 07/11 às 21h e 08/11 às 0h UTC).
 
 ### 7.6 Terraform (DEC-22, ADR-10)
 
@@ -672,3 +679,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.21 | 07/11/2026 | §5.1: implementação da etapa 2 (somas em ordem fixa, disponibilidade dos minutos anteriores, sem aquecimento, saída do comando, testes) e MD-30 (9 meses no MacBook em 11 s, pico de 2,5 GB). |
 | 0.22 | 07/11/2026 | §5.2 aprovado em 07/11/2026 (DEC-37). §5 e §5.2: datasets da etapa 3 (DEC-36): preço de execução nos agregados (versão 2) e refação pelo job sob demanda, alvo e pontos elegíveis, construção e envio ao S3, trava do holdout com registro de acesso, custo. |
 | 0.23 | 07/11/2026 | §5.2: implementação da etapa 3 (preço de execução sem ordem, recusa da versão 1 no alvo, colunas da tabela, id e versão do código, mesmo arquivo byte a byte, manifesto, trava do holdout em duas etapas, testes). |
+| 0.24 | 08/11/2026 | §5.2: MD-31 (dataset do desenvolvimento da trilha A no MacBook em 35 s com o cache cheio, pico de 2,7 GiB, mesmo arquivo ao refazer). §7.8: terceira e quarta execuções (agregados refeitos na versão 2). |
