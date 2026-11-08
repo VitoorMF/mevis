@@ -300,7 +300,12 @@ derived/datasets/<id>/ ── cache local ──▶ pipeline/baselines ──▶
   - B1 teve retorno líquido de −38,6% no período, com Sharpe de −1,20 e drawdown de 50,2%: o preço caiu no desenvolvimento.
   - B3 fez 4.656 operações (H = 15) e 2.780 (H = 60), com expectativa de −22,7 e −23,5 pb por operação. Isso está perto da ida e volta de custos do cenário base (~22 pb), ou seja, o resultado antes dos custos fica perto de zero. Com os juros compostos, o capital termina perto de zero em todos os cenários.
   - B2 não tem resultado a relatar sem um modelo, porque o número de operações foi arbitrário.
-- **Código sem commit.** A medição usou código sem commit. O dataset (`847e7cf5f2be0e5c`, versão marcada `.dirty`) foi enviado a `derived/datasets/`, mas as execuções usaram um registro e um armazenamento temporários, sem registros em `derived/experiments/`. O dataset oficial e as primeiras execuções registradas no S3 vêm depois do commit, com outro id, porque a versão do código faz parte da identificação.
+- **Código sem commit, depois o oficial.** A medição usou código sem commit. O dataset dela (`847e7cf5f2be0e5c`, versão marcada `.dirty`) foi enviado a `derived/datasets/`, mas as execuções usaram um registro e um armazenamento temporários, sem registros em `derived/experiments/`.
+  - Depois do commit `22dd269`, o dataset foi refeito em 27 s, agora sem `.dirty`, com outro id, porque a versão do código faz parte da identificação: `1f96ddf76ce5e058`. Os pontos elegíveis são os mesmos.
+  - Esse é o dataset do desenvolvimento da trilha A a partir de agora.
+  - As primeiras execuções registradas no S3 são os baselines B0, B1 e B3 nele, com H = 15 e H = 60: `exp-20261108T020219.811923Z` e `exp-20261108T020222.085525Z`.
+  - Os resultados são os mesmos da medição, e os três cenários de sensibilidade estão no registro, sem preço de estresse trocado.
+  - A contagem do IS-15 continua em zero tentativas nas duas trilhas.
 
 ---
 
@@ -745,4 +750,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.23 | 07/11/2026 | §5.2: implementação da etapa 3 (preço de execução sem ordem, recusa da versão 1 no alvo, colunas da tabela, id e versão do código, mesmo arquivo byte a byte, manifesto, trava do holdout em duas etapas, testes). |
 | 0.24 | 07/11/2026 | §5.2: MD-31 (dataset do desenvolvimento da trilha A no MacBook em 35 s com o cache cheio, pico de 2,7 GiB, mesmo arquivo ao refazer). §7.8: terceira e quarta execuções (agregados refeitos na versão 2). |
 | 0.25 | 07/11/2026 | §5.3 aprovado em 07/11/2026 (DEC-39). §5 e §5.3: simulador, baselines e registro das etapas 4 e 5 (DEC-38): colunas de simulação no dataset, simulador e cenários, capital minuto a minuto, sorteio de B2, registro em SQLite com registros só de acréscimo no S3, comandos e testes previstos. MD-31 e linha 0.24 com a data de Brasília (07/11). |
-| 0.26 | 07/11/2026 | §5.3: implementação das etapas 4 e 5 (colunas de simulação, B1 e B2 no comando, tentativas dos baselines, ordem das recusas, registros locais e reconstrução, testes) e MD-32 (dataset refeito em 25 s; baselines nos sete cenários em cerca de 1 s, B2 com 20.000 operações em 0,9 s, pico de ~560 MB). |
+| 0.26 | 07/11/2026 | §5.3: implementação das etapas 4 e 5 (colunas de simulação, B1 e B2 no comando, tentativas dos baselines, ordem das recusas, registros locais e reconstrução, testes) e MD-32 (dataset refeito em 25 s; baselines nos sete cenários em cerca de 1 s, B2 com 20.000 operações em 0,9 s, pico de ~560 MB); dataset oficial `1f96ddf76ce5e058`, refeito depois do commit, e as primeiras execuções de baselines registradas no S3. |
