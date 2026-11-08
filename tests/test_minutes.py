@@ -419,7 +419,8 @@ def test_features_command_writes_parquet_with_catalog(tmp_path: Path) -> None:
 
 
 def test_cli_does_not_need_numpy() -> None:
-    """O host não tem numpy até a V0.3 (RNF-029): a CLI importa as features só no comando."""
+    """O host não tem numpy, xgboost nem scikit-learn (RNF-029): a CLI importa a pesquisa só no
+    comando."""
     code = (
         "import sys; sys.modules['numpy'] = None\n"
         "import trader.cli.main\n"
@@ -429,6 +430,11 @@ def test_cli_does_not_need_numpy() -> None:
         "assert 'trader.pipeline.datasets' not in sys.modules\n"
         "assert not any(m.startswith('trader.backtest') for m in sys.modules)\n"
         "assert 'trader.pipeline.baselines' not in sys.modules\n"
+        "assert not any(m.startswith(('trader.models', 'trader.stats')) for m in sys.modules)\n"
+        "assert 'trader.pipeline.walkforward' not in sys.modules\n"
+        "assert 'trader.pipeline.report' not in sys.modules\n"
+        "assert not any(m.split('.')[0] in ('xgboost', 'sklearn') for m in sys.modules)\n"
         "import trader.experiments.registry\n"
+        "import trader.pipeline.research\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True)

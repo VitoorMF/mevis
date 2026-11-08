@@ -31,12 +31,17 @@ class Metrics:
         return asdict(self)
 
 
+def daily_returns(path: Path) -> np.ndarray:
+    """Variação do capital marcado entre os fins de dias UTC consecutivos (doc 04 §10.1)."""
+    ends = path.equity[path.day_last]
+    return np.asarray(ends / np.concatenate([[1.0], ends[:-1]]) - 1)
+
+
 def metrics(path: Path) -> Metrics:
     returns, equity = path.returns, path.equity
     trades = len(returns)
     peak = np.maximum.accumulate(np.concatenate([[1.0], equity]))[1:]
-    ends = equity[path.day_last]
-    daily = ends / np.concatenate([[1.0], ends[:-1]]) - 1
+    daily = daily_returns(path)
     sharpe = None
     if len(daily) >= 2:
         deviation = float(np.std(daily, ddof=1))

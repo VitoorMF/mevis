@@ -4,8 +4,8 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 02 — SRS |
-| Versão | 0.12 — rascunho |
-| Escopo desta versão | **V0.1 (Data Engine) detalhada**, mais os agregados por minuto da etapa 1 da V0.2 (§4.8), as features da etapa 2 (§4.11), os datasets da etapa 3 (§4.12) e o simulador, os baselines e o registro de experimentos das etapas 4 e 5 (§4.13). O resto da V0.2 e a V0.3 apenas delimitados (§9). |
+| Versão | 0.13 — rascunho |
+| Escopo desta versão | **V0.1 (Data Engine) detalhada**, mais os agregados por minuto da etapa 1 da V0.2 (§4.8), as features da etapa 2 (§4.11), os datasets da etapa 3 (§4.12) o simulador, os baselines e o registro de experimentos das etapas 4 e 5 (§4.13) e o treino, a validação e o relatório de desenvolvimento da etapa 6 (§4.14). O resto da V0.2 e a V0.3 apenas delimitados (§9). |
 | Status | Aguardando revisão |
 | Data | 23/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.6; [03 — Architecture](03-architecture.md) v0.2; [06 — Data & Integrations](06-data-integrations.md) v0.2; [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -373,6 +373,32 @@ Regra de operação, custos, cenários, métricas e baselines estão no doc 04 �
 | RF-275 | O registro deve ficar num SQLite local e deveria poder ser refeito a partir dos registros de `derived/experiments/`. | Must / Should | F-19, doc 04 §11 | T |
 | RF-276 | O sistema deveria oferecer o comando `trader experiments list\|show\|count\|discard\|rebuild`, que lista as execuções, mostra uma, conta as tentativas por trilha, marca uma execução como descartada e refaz o SQLite a partir do S3. | Should | F-19 | D |
 
+### 4.14 Treino, validação e relatório de desenvolvimento (F-15, F-16, F-18, F-20) — V0.2, etapa 6
+
+Modelos, dobras, seleção na validação interna e estatísticas estão no doc 04 §7, §8 e §10.1 (v1.7, DEC-41). Nesta etapa, só o desenvolvimento da trilha A; o modelo final e o holdout são da etapa 7.
+
+| ID | Requisito | Prior. | Origem | Verif. |
+|---|---|---|---|---|
+| RF-235 | Cada degrau deve usar só as features do catálogo das suas famílias (RF-209): B4, as de candles; B5, as de candles e volume; B6, as de candles, volume e fluxo. Os modelos não podem ler as colunas de validade, alvo, preço ou simulação do dataset. | Must | F-15, doc 04 §7 | T |
+| RF-236 | O treino deve usar todos os pontos elegíveis do horizonte (RF-225) no trecho de ajuste ou de treino, menos os pontos t cuja saída, no minuto t + 1 + H, cai depois do início da janela seguinte (purga). Numa janela de validação ou de teste, só entram os pontos e as operações cuja saída cai dentro dela. | Must | F-16, doc 04 §8.1 | T |
+| RF-237 | O sistema deve treinar a regressão logística (features padronizadas pela média e pelo desvio do trecho de ajuste, penalidade L2 com o C da grade) e o XGBoost (grade do doc 04 §7, taxa de aprendizado 0,05, subamostragem 0,8, semente 0, número fixo de threads). As mesmas entradas devem dar as mesmas previsões. | Must | F-15, doc 04 §7 | T |
+| RF-238 | O walk-forward da trilha A deve ter as seis dobras do doc 04 §8.1 (meses do dia 23 ao dia 22, em dias UTC inteiros): em cada uma, um trecho de ajuste, um mês de validação, o treino final da dobra (ajuste e validação) e um mês de teste. | Must | F-16, doc 04 §8.1 | T |
+| RF-239 | Em cada dobra, os hiperparâmetros devem ser os da combinação da grade com menor log loss nos pontos da validação, com o modelo ajustado só no trecho de ajuste; num empate, a primeira da grade. | Must | F-16, DEC-41 | T |
+| RF-240 | Com as previsões da combinação escolhida, cada τ da grade deve ser simulado na validação no cenário base (RF-251); entre os τ com pelo menos 20 operações, fica o de maior Sharpe; num empate, o maior τ. | Must | F-16, DEC-41 | T |
+| RF-241 | Se nenhum τ tiver 20 operações na validação, ou se o Sharpe do escolhido não for positivo, a estratégia não deve operar no mês de teste; a dobra fica com resultado zero e marcada como abstenção. | Must | F-16, DEC-41 | T |
+| RF-242 | Sem abstenção, a combinação escolhida deve ser ajustada de novo no treino final da dobra e operar no mês de teste com o τ escolhido, nos sete cenários (RF-253). Os dados do teste não podem influir nas escolhas: alterar alvos ou preços do mês de teste não muda os hiperparâmetros, o τ nem a abstenção. | Must | F-16, IS-12 | T |
+| RF-243 | O resultado do desenvolvimento deve ser a junção das dobras de teste (RF-255), por cenário, com as métricas de cada dobra separadas (IS-18). | Must | F-16, doc 04 §8.1 | T |
+| RF-244 | Para cada dobra, o sistema deveria calcular AUC e log loss no teste e a importância das features: ganho médio no XGBoost e valor absoluto dos coeficientes padronizados na logística. | Should | F-15, doc 04 §10.1 | T |
+| RF-245 | Cada execução de modelo deve cobrir uma trilha, um degrau, um horizonte e um modelo e ser registrada antes de ler o dataset (RF-271). As tentativas são as combinações de hiperparâmetros e τ, com as métricas de cada mês de validação (RF-272). O resultado do procedimento (escolhas por dobra, abstenções, métricas do teste e diagnósticos) e as previsões de validação e de teste ficam com a execução, no Mac e em `derived/experiments/`. | Must | F-19, doc 04 §11 | T |
+| RF-246 | O walk-forward da etapa 6 deve recusar um dataset de avaliação final (RF-228). | Must | IS-12, RN-013 | T |
+| RF-247 | O sistema deveria oferecer o comando `trader walkforward --dataset <id> [--rungs B4,B5,B6] [--horizons 15,60] [--models logistic,xgboost]`, que roda cada combinação como uma execução e mostra as escolhas de cada dobra e as métricas das dobras juntas. | Should | F-15, F-16 | D |
+| RF-277 | O sistema deve calcular o intervalo de 95% da expectativa líquida por operação por bootstrap em blocos de um dia UTC (IS-14): 10.000 amostras, percentis 2,5 e 97,5, semente registrada; amostras sem operação ficam fora e são contadas. | Must | F-18, IS-14 | T |
+| RF-278 | O sistema deve calcular o Deflated Sharpe Ratio (IS-15) pela fórmula do doc 04 §10.1, com N igual ao número de tentativas da trilha (RF-274) e V igual à variância, entre as tentativas, do Sharpe diário sem anualizar de cada uma nos meses de validação juntos; uma tentativa sem operação nesses meses tem Sharpe zero. | Must | F-18, IS-15, DEC-41 | T |
+| RF-279 | O sistema deve comparar B5 com B4 e B6 com B5, em cada horizonte, por bootstrap pareado nos mesmos dias (10.000 amostras) da diferença de expectativa por operação e da diferença de Sharpe; há ganho incremental se o percentil 2,5 da diferença for maior que zero. | Must | F-18, doc 04 §10.2 | T |
+| RF-280 | Para cada modelo, B2 (RF-233) deve usar o número de operações do modelo em cada dobra de teste e juntar as dobras em cada simulação. | Must | F-14, IS-16 | T |
+| RF-281 | O sistema deve gerar o relatório de desenvolvimento do doc 04 §10.1 a partir do registro, das previsões guardadas e do dataset, sem treinar de novo. Para cada degrau, horizonte e modelo, ele usa a execução terminada mais recente, não descartada, do mesmo dataset, e recusa juntar execuções de datasets diferentes. O relatório é gravado em Markdown no Mac e em `derived/reports/`. | Must | F-20, doc 04 §10.1 | T |
+| RF-282 | O sistema deveria oferecer o comando `trader report --dataset <id>`, que gera o relatório de RF-281. | Should | F-20 | D |
+
 ---
 
 ## 5. Requisitos não funcionais
@@ -410,6 +436,7 @@ Regra de operação, custos, cenários, métricas e baselines estão no doc 04 �
 | RNF-029 | Dependências | O cálculo das features usa `numpy` (DEC-34), num grupo opcional de pesquisa, fora do artefato do host até a V0.3 precisar das features ao vivo; o grupo precisa ter pacotes para macOS ARM64 e Linux ARM64 e x86_64 (RNF-022). | DEC-34, RNF-022 | I |
 | RNF-030 | Desempenho | Construir o dataset do desenvolvimento da trilha A (9 meses) no MacBook em até 15 min, com até 4 GiB de memória no processo, fora o download do cache [PROPOSTA]. | doc 04 §12 | T, A |
 | RNF-031 | Desempenho | No desenvolvimento da trilha A (9 meses), simular uma estratégia num horizonte nos sete cenários em até 30 s e as 1.000 simulações de B2 em até 2 min, no MacBook, com até 4 GiB de memória no processo [PROPOSTA]. | doc 04 §12 | T, A |
+| RNF-032 | Desempenho | O walk-forward completo do desenvolvimento da trilha A (3 degraus × 2 horizontes × 2 modelos) deve rodar no MacBook em até 2 h, com até 4 GiB de memória no processo, e o relatório de desenvolvimento em até 2 min [PROPOSTA]. | doc 04 §12 | T, A |
 
 ---
 
@@ -559,9 +586,9 @@ Estes requisitos serão escritos em versão futura do SRS, depois dos documentos
 |---|---|---|---|---|
 | V0.2 | Features point-in-time | F-12 | RF-201–RF-219 | **Detalhado em §4.11** (RF-201 a RF-213, v0.10) |
 | V0.2 | Datasets versionados | F-13 | RF-221–RF-229 | **Detalhado em §4.12** (RF-221 a RF-229, v0.11) |
-| V0.2 | Baselines, treinamento e validação | F-14, F-15, F-16 | RF-231–RF-249 | **Baselines detalhados em §4.13** (RF-231 a RF-234, v0.12); treino e validação na etapa 6 (doc 04 §7 e §8) |
+| V0.2 | Baselines, treinamento e validação | F-14, F-15, F-16 | RF-231–RF-249 | **Baselines detalhados em §4.13** (RF-231 a RF-234, v0.12); **treino e validação em §4.14** (RF-235 a RF-247, v0.13) |
 | V0.2 | Backtester com custos | F-17 | RF-251–RF-269 | **Detalhado em §4.13** (RF-251 a RF-257, v0.12); o modelo de preenchimento do doc 05 vem depois |
-| V0.2 | Ablações, registro e relatórios | F-18, F-19, F-20 | RF-271–RF-289 | **Registro detalhado em §4.13** (RF-271 a RF-276, v0.12); ablações e relatórios na etapa 6 (docs 04 e 07) |
+| V0.2 | Ablações, registro e relatórios | F-18, F-19, F-20 | RF-271–RF-289 | **Registro detalhado em §4.13** (RF-271 a RF-276, v0.12); **estatísticas, ablações e relatório de desenvolvimento em §4.14** (RF-277 a RF-282, v0.13); relatórios de paper trading no doc 07 |
 | V0.3 | Signal Engine | F-22 | RF-301–RF-309 | Doc 05 |
 | V0.3 | Risk Manager e kill switch | F-23, F-24 | RF-311–RF-329 | Doc 05 (limites) |
 | V0.3 | Execução simulada, testnet e posições | F-25, F-26, F-27 | RF-331–RF-349 | Doc 05 (estados de ordem, reconciliação) |
@@ -589,7 +616,9 @@ Requisitos da V0.1 que já servem às versões seguintes: replay (RF-134) para a
 | F-12 Features (V0.2) | RF-201–RF-213; RNF-028, RNF-029 | — | IS-11, CA-08 |
 | F-13 Datasets (V0.2) | RF-221–RF-229; RNF-030 | — | IS-12, CA-07 |
 | F-14 Baselines (V0.2) | RF-231–RF-234 | — | IS-16 |
+| F-15 Treinamento e F-16 Validação temporal (V0.2) | RF-235–RF-247; RNF-032 | — | IS-12, IS-18 |
 | F-17 Backtester com custos (V0.2) | RF-251–RF-257; RNF-031 | — | IS-14, IS-19 |
+| F-18 Ablações e F-20 Relatórios (V0.2) | RF-277–RF-282 | — | IS-14, IS-15, IS-16 |
 | F-19 Registro de experimentos (V0.2) | RF-271–RF-276 | — | IS-13, IS-15, CA-11 |
 | Transversal: operação | RF-181–RF-187 | UC-01, UC-07 | — |
 | Transversal: segurança e custo | RN-001, RN-012, RN-015; RNF-013–RNF-017, RNF-023–RNF-025 | — | — |
@@ -641,3 +670,4 @@ Nenhuma pendência aberta que afete a V0.1. Resolvidas em 23/10/2026: PD-06 → 
 | 0.10 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-35). Etapa 2 da V0.2 (DEC-34): §4.11 com RF-201 a RF-213 (features point-in-time), RNF-028 e RNF-029; §9 e §10 atualizados. |
 | 0.11 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-37). Etapa 3 da V0.2 (DEC-36): §4.12 com RF-221 a RF-229 (preço de execução por minuto, alvo, pontos elegíveis, tabela e identificação do dataset, trava do holdout) e RNF-030; §9 e §10 atualizados. |
 | 0.12 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-39). Etapas 4 e 5 da V0.2 (DEC-38): §4.13 com RF-231 a RF-234 (baselines), RF-251 a RF-257 (simulador com custos), RF-271 a RF-276 (registro de experimentos) e RNF-031; RF-226 com as colunas de simulação; §9 e §10 atualizados. |
+| 0.13 | 08/11/2026 | Aprovado em 08/11/2026 (DEC-42). Etapa 6 da V0.2 (DEC-41): §4.14 com RF-235 a RF-247 (features por degrau, purga, modelos, dobras, seleção pelo log loss e pelo Sharpe, abstenção, teste, registro e comando `trader walkforward`) e RF-277 a RF-282 (bootstrap, DSR, ablações, B2 do modelo, relatório e comando `trader report`); RNF-032; §9 e §10 atualizados. |

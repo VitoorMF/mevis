@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.26 — rascunho |
+| Versão | 0.28 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -160,12 +160,14 @@ trader/
   datasets/    alvo, pontos elegíveis e tabela do dataset (doc 04 §4, §11) (sem E/S)
   backtest/    simulador, cenários de custo, métricas e baselines (doc 04 §6, §9, §10.1) (sem E/S)
   experiments/ registro de experimentos em SQLite e contagem de tentativas (doc 04 §11)
+  models/      modelos, dobras do walk-forward e seleção na validação (doc 04 §7, §8) (sem E/S)
+  stats/       bootstrap em blocos de um dia, DSR e ablações (doc 04 §10.1)     (sem E/S)
   pipeline/    rodada horária: órfãos, compressão, normalização por hora, máscara, exportações,
                réplica e retenção; backfill dos arquivos públicos (doc 06 §7);
                relatório de qualidade (doc 06 §8.3); dados do painel da coleta (doc 06 §8.4);
                publicador da página pública de status (§7.7); agregados por minuto (§7.8);
                montagem da série de minutos para as features (§5.1); construção dos datasets (§5.2);
-               execução dos baselines (§5.3)
+               execução dos baselines (§5.3); walk-forward e relatório de desenvolvimento (§5.4)
   public/      página pública de status (HTML estático, sem bibliotecas externas; §7.7)
   ops/         configuração, logs estruturados, StatsD, saúde, estado SQLite
   cli/         comandos
@@ -182,6 +184,7 @@ trader/
 | `sqlite3` (biblioteca padrão) | Estado operacional; registro de experimentos (§5.3) | Sem servidor. |
 | DuckDB, Polars | Leitura na pesquisa (MacBook) | DEC-20. Os agregados por minuto usam só `pyarrow`, para caber no pacote do host (PD-24, DEC-31). |
 | `numpy` | Cálculo das features (§5.1) e simulador (§5.3) | DEC-34. Grupo opcional `pesquisa`, fora do artefato do host até a V0.3 (RNF-029). |
+| `xgboost`, `scikit-learn` | Modelos da etapa 6 (§5.4) | Grupo `pesquisa` (doc 04 §12). O XGBoost no macOS usa o OpenMP do Homebrew (`libomp`), já instalado no MacBook. |
 | `pytest`, `ruff`, `mypy` | Testes e qualidade | RNF-020. |
 
 ### 5.1 Features da V0.2 (etapa 2; DEC-34; SRS §4.11)
@@ -306,6 +309,122 @@ derived/datasets/<id>/ ── cache local ──▶ pipeline/baselines ──▶
   - As primeiras execuções registradas no S3 são os baselines B0, B1 e B3 nele, com H = 15 e H = 60: `exp-20261108T020219.811923Z` e `exp-20261108T020222.085525Z`.
   - Os resultados são os mesmos da medição, e os três cenários de sensibilidade estão no registro, sem preço de estresse trocado.
   - A contagem do IS-15 continua em zero tentativas nas duas trilhas.
+
+### 5.4 Treino, validação e relatório de desenvolvimento da V0.2 (etapa 6; DEC-41; SRS §4.14)
+
+```text
+data/datasets/<id> ──▶ pipeline/walkforward ──▶ models: por dobra, ajuste → log loss → τ pelo Sharpe
+                              │                        (backtest/simulator) → abstenção ou treino final → teste
+                              │                              └──▶ experiments: tentativas, resultado e previsões
+                              ▼
+                       pipeline/report ──▶ backtest (baselines, B2 do modelo) + stats (bootstrap, DSR, ablações)
+                                                  └──▶ data/reports/<id>.md e derived/reports/
+```
+
+- **Modelos** (`models/estimators.py`):
+  - logística do scikit-learn (L2, `lbfgs`), com a padronização calculada no trecho de ajuste;
+  - XGBoost (`binary:logistic`, `tree_method = hist`, semente 0, 4 threads fixos).
+
+  Os dois recebem e devolvem arrays `numpy`; o resto do código não conhece a biblioteca. A importância das features sai daqui: ganho médio no XGBoost e coeficientes padronizados na logística.
+- **Dobras** (`models/folds.py`): os meses do dia 23 ao dia 22 viram janelas de dias inteiros (`backtest.simulator.Window`), e cada dobra dá quatro trechos: ajuste, validação, treino final e teste. A purga é um corte de índices: no fim de cada trecho de ajuste ou de treino, saem os H + 1 últimos minutos antes da janela seguinte.
+- **Seleção e walk-forward** (`models/selection.py`, `models/walkforward.py`):
+  - log loss e AUC em `numpy`;
+  - τ simulado pelo `simulate` da etapa 4 no cenário base;
+  - abstenção e teste nos sete cenários.
+
+  Uma chamada cobre um degrau, um horizonte e um modelo e devolve três coisas: as tentativas (com as métricas de cada mês de validação), o resultado do procedimento e as previsões. Não faz E/S.
+- **Estatísticas** (`stats/bootstrap.py`, `stats/dsr.py`):
+  - o bootstrap sorteia índices de dias com o gerador PCG64 e, com uma soma acumulada por dia, calcula as 10.000 amostras sem laço em Python por operação;
+  - o pareado usa os mesmos índices para os dois degraus;
+  - Φ e Φ⁻¹ vêm de `statistics.NormalDist`, da biblioteca padrão.
+- **Execução** (`pipeline/walkforward.py`, comando `trader walkforward`):
+  - lê o manifesto e recusa o dataset de avaliação final (RF-246);
+  - registra a execução antes de ler o Parquet;
+  - carrega só as colunas do degrau e as de simulação;
+  - roda o walk-forward e fecha o registro.
+
+  Cada combinação de degrau, horizonte e modelo é uma execução; as 12 da trilha A rodam em sequência, e uma que falha não impede as outras.
+- **Registro:** o registro de resultado (`<id>.result.json`) ganha o campo `outcome`, com as escolhas por dobra, as abstenções, as métricas do teste e os diagnósticos. No SQLite, ele vai para uma tabela nova, `outcomes`, criada se não existir, de modo que um registro antigo continua válido e `rebuild` refaz tudo. As previsões (minuto, dobra, trecho, combinação, p) ficam em `data/experiments/artifacts/<id>/predictions.parquet` e em `derived/experiments/<id>/predictions.parquet`. O SHA-256 delas vai no registro de resultado.
+- **Relatório** (`pipeline/report.py`, comando `trader report`):
+  - junta as execuções mais recentes de cada degrau, horizonte e modelo do dataset;
+  - refaz a simulação de teste a partir das previsões, sem treinar de novo;
+  - calcula os baselines nas mesmas janelas, B2 com as operações do modelo em cada dobra, o bootstrap, o DSR e as ablações;
+  - grava o Markdown em `data/reports/<id do relatório>.md` e em `derived/reports/`.
+
+  O relatório não sai do Mac por outro caminho: a página pública continua sem dados de mercado.
+- **Quem grava no S3:** o MacBook, com o perfil `trader`, em `derived/experiments/` e `derived/reports/`. São poucos MB por execução; custo desprezível.
+- **Dependências:** `xgboost` e `scikit-learn` (com `scipy`, `joblib` e `threadpoolctl`) entram no grupo `pesquisa`, ~150 MB no ambiente do Mac. Elas cabem no disco (2,3 GiB livres em 08/11/2026), mas o espaço é conferido antes da instalação. A CLI importa os pacotes novos só dentro dos comandos, e o host continua sem eles (RNF-029).
+- **Tamanho e tempo:** são 288 ajustes na trilha A:
+  - por degrau e horizonte, 6 dobras × (4 + 1) do XGBoost e 6 × (2 + 1) da logística;
+  - cada ajuste usa até ~340 mil pontos e 37 features;
+  - estimativa: dezenas de segundos por ajuste do XGBoost no M2, menos de 1 h no total;
+  - memória: as colunas em FLOAT64 ocupam ~120 MB, e o pico fica abaixo de 2 GiB.
+
+  Previsões guardadas: ~10 MB por execução, ~120 MB nas 12. RNF-032: até 2 h e 4 GiB.
+- **Testes previstos:**
+  - dobras e purga contra datas escritas à mão;
+  - seleção: um caso sintético em que o log loss e o Sharpe apontam escolhas conhecidas, com os desempates;
+  - abstenção com menos de 20 operações e com Sharpe negativo;
+  - o teste não influi: trocar alvos e preços do mês de teste não muda as escolhas;
+  - mesmas entradas, mesmas previsões;
+  - padronização só com o trecho de ajuste;
+  - bootstrap: retornos constantes dão intervalo degenerado; amostras sem operação são contadas; o pareado usa os mesmos dias;
+  - DSR contra um exemplo calculado à mão e contra a contagem do registro;
+  - registro com `outcome` e reconstrução;
+  - relatório que recusa execuções de datasets diferentes;
+  - recusa do dataset de avaliação final;
+  - CLI sem `numpy`, `xgboost` e `scikit-learn`.
+
+**Implementação (08/11/2026).** Módulos novos:
+- `models/estimators.py` (modelos e grades);
+- `models/folds.py` (meses, dobras e purga);
+- `models/selection.py` (log loss, AUC e escolhas);
+- `models/walkforward.py` (walk-forward, sem E/S);
+- `stats/bootstrap.py` e `stats/dsr.py`;
+- `pipeline/research.py` (manifesto e Parquet pelo id, agora usado também por `pipeline/baselines.py`);
+- `pipeline/walkforward.py` e `pipeline/report.py`.
+
+Comandos novos: `trader walkforward` (RF-247) e `trader report` (RF-282). Detalhes que o texto acima não fixava:
+
+- **Pontos.** A purga usa a mesma lista de pontos em que B2 sorteia (`backtest.baselines.candidates`): os pontos elegíveis da janela com t ≤ fim − 2 − H. É erro um ponto elegível sem alvo 0 ou 1, ou com alguma feature indefinida. No dataset oficial isso não acontece: os 391.605 pontos elegíveis de H = 15 e os 391.560 de H = 60 têm alvo e as 37 features.
+- **Modelos.**
+  - Logística: `lbfgs` com até 1.000 iterações. Na padronização, uma feature constante no trecho de ajuste recebe desvio 1.
+  - XGBoost: `hist`, com 4 threads e semente 0.
+  - Um trecho de ajuste com uma classe só é erro.
+- **Diagnósticos.** A AUC vem da estatística de Mann-Whitney, com empates pela média dos postos, e fica vazia quando só há uma classe. O log loss limita p a [10⁻¹⁵; 1 − 10⁻¹⁵].
+- **Tentativas.** As métricas de cada tentativa ficam por mês de validação (cenário base, com log loss e AUC). Ficam também em `validation`, a junção dos meses, de onde sai o Sharpe do DSR. O Sharpe diário sem anualizar é o anualizado dividido por √365. Uma tentativa sem Sharpe (sem operação ou sem variação) conta como zero.
+- **Teste na abstenção.** O teste é sempre ajustado e previsto (AUC, log loss e importância), mas o sinal fica vazio: a dobra tem zero operações e capital constante.
+- **Previsões.** Um Parquet por execução, com zstd: minuto (`minute_ts_us`), dobra, trecho (0 para validação, 1 para teste), combinação e p. O SHA-256 vai no registro de resultado. O relatório baixa o arquivo se ele faltar no Mac e confere o SHA-256.
+- **Relatório.**
+  - Refaz cada dobra de teste com as previsões e o τ do registro e compara as métricas do cenário base com as registradas. Se diferirem, é erro (RF-281).
+  - B0, B1 e B3 são calculados por dobra e juntados como o modelo. B2 usa as operações do modelo em cada dobra (RF-280), com 1.000 simulações no cenário base.
+  - O bootstrap e o DSR usam os retornos diários das dobras juntas. Cada operação entra no dia da saída (minuto t + 1 + H). O N do DSR é a contagem de tentativas da trilha no registro; o V vem dos Sharpe de validação dessas mesmas tentativas.
+  - A prévia dos critérios de G2 (IS-14 a IS-19) mostra o drawdown máximo nos cenários base e de estresse, cada um julgado contra o limite de 15% (doc 04 §10.2). [PENDÊNCIA] O IS-19 não diz se o limite vale para o drawdown do cenário base ou do de estresse. Isso precisa ser decidido antes do holdout (etapa 7).
+  - As ablações comparam só os degraus do XGBoost (B5 − B4 e B6 − B5); a logística aparece como referência. O relatório mostra, para cada par, se o percentil 2,5 fica acima de zero na expectativa e no Sharpe, separadamente. [PENDÊNCIA] O doc 04 §10.1 fala em "percentil 2,5 da diferença" para as duas diferenças, sem dizer se o ganho incremental exige as duas ou basta uma. Isso também precisa ser decidido antes do holdout.
+  - O id do relatório é `rep-<AAAAMMDDTHHMMSS.ffffffZ>`. O Markdown fica em `data/reports/` (fora do Git) e em `derived/reports/`.
+- **Saída dos comandos.**
+  - `trader walkforward` mostra, por execução: os hiperparâmetros, o τ ou a abstenção e o retorno de cada dobra; as métricas das dobras juntas nos cenários base e de estresse; e o tempo. No fim, mostra o pico de memória. Sai com 1 se alguma execução falhou e com 2 numa recusa.
+  - `trader report` mostra um resumo do XGBoost por degrau e horizonte e os caminhos do Markdown.
+- **Testes** (`tests/test_models.py`, `tests/test_stats.py`, `tests/test_walkforward.py`, `tests/test_minutes.py`): os previstos acima. O DSR é conferido com uma conta feita à mão e com as funções do scipy. Os testes também cobrem:
+  - a reprodução do teste a partir das previsões;
+  - a recusa de previsões alteradas (SHA-256 diferente) e de um registro cujo τ não reproduz o teste;
+  - a reconstrução do registro, com o arquivo de previsões baixado do armazenamento;
+  - os dois comandos, de ponta a ponta, num dataset sintético de quatro meses.
+
+**MD-33 — medição da etapa 6 (08/11/2026, MacBook, RNF-032).** A medição usou um dataset sintético do tamanho do desenvolvimento da trilha A, para não ver resultados de desenvolvimento antes da execução oficial:
+- 23/10/2025 a 22/07/2026, 393.120 minutos;
+- as 37 features contínuas, com ruído;
+- algum sinal em uma de cada sete features;
+- registro e armazenamento numa pasta local, sem S3.
+
+O tempo de ajuste depende do tamanho, não dos valores. Resultados:
+- **Walk-forward completo** (12 execuções, 6 dobras cada, 288 ajustes): 7 min 22 s, com pico de 1,7 GiB no processo (RNF-032: até 2 h e 4 GiB).
+  - Cada execução da logística levou de 2 a 5 s.
+  - Cada execução do XGBoost levou de 44 a 63 s em B4 e B5, e cerca de 100 s em B6, com 37 features.
+  - As previsões ocupam 118 MB nas 12 execuções, como estimado.
+- **Relatório** das 12 execuções: 5,2 s, com pico de ~600 MB, 180 tentativas contadas e as seis dobras de teste.
+- **Dataset oficial.** Antes da medição, uma contagem confirmou que todos os pontos elegíveis têm alvo válido e as 37 features definidas, e que nenhum dado do holdout foi lido.
+- **Execução oficial.** Roda depois do commit, para que a versão do código não leve `.dirty`. O tempo dela entra aqui quando acontecer.
 
 ---
 
@@ -751,3 +870,5 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.24 | 07/11/2026 | §5.2: MD-31 (dataset do desenvolvimento da trilha A no MacBook em 35 s com o cache cheio, pico de 2,7 GiB, mesmo arquivo ao refazer). §7.8: terceira e quarta execuções (agregados refeitos na versão 2). |
 | 0.25 | 07/11/2026 | §5.3 aprovado em 07/11/2026 (DEC-39). §5 e §5.3: simulador, baselines e registro das etapas 4 e 5 (DEC-38): colunas de simulação no dataset, simulador e cenários, capital minuto a minuto, sorteio de B2, registro em SQLite com registros só de acréscimo no S3, comandos e testes previstos. MD-31 e linha 0.24 com a data de Brasília (07/11). |
 | 0.26 | 07/11/2026 | §5.3: implementação das etapas 4 e 5 (colunas de simulação, B1 e B2 no comando, tentativas dos baselines, ordem das recusas, registros locais e reconstrução, testes) e MD-32 (dataset refeito em 25 s; baselines nos sete cenários em cerca de 1 s, B2 com 20.000 operações em 0,9 s, pico de ~560 MB); dataset oficial `1f96ddf76ce5e058`, refeito depois do commit, e as primeiras execuções de baselines registradas no S3. |
+| 0.27 | 08/11/2026 | §5.4 aprovado em 08/11/2026 (DEC-42). §5 e §5.4: treino, validação e relatório de desenvolvimento da etapa 6 (DEC-41): pacotes `models` e `stats`, walk-forward e relatório no pipeline, campo `outcome` e tabela `outcomes` no registro, previsões guardadas, `xgboost` e `scikit-learn` no grupo `pesquisa`, estimativa de tempo e testes previstos. |
+| 0.28 | 08/11/2026 | §5.4: implementação da etapa 6 (pontos e purga, modelos, diagnósticos, tentativas, abstenção, previsões, relatório, saída dos comandos e testes), duas pendências para antes do holdout (cenário do drawdown do IS-19 e regra do ganho incremental nas ablações) e MD-33 (walk-forward sintético do tamanho da trilha A em 7 min 22 s, pico de 1,7 GiB; relatório em 5,2 s). |

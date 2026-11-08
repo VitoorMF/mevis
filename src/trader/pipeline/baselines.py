@@ -6,13 +6,12 @@ de operações dado, B2, em todos os cenários, e fecha o registro com as métri
 `numpy`: só a CLI o importa, dentro do comando (RNF-029).
 """
 
-import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 import numpy as np
 import pyarrow.parquet as pq
@@ -22,19 +21,14 @@ from trader.backtest.metrics import Metrics, metrics
 from trader.backtest.simulator import Market, Run, Window, run_trades, simulate
 from trader.core.holdout import HoldoutRefused
 from trader.experiments.registry import Registry, Trial
-from trader.storage.rawfiles import file_sha256
+from trader.pipeline.research import Fetcher, dataset_file, read_manifest
 
-DATASETS = "derived/datasets"
 MODELS = {
     "B0": "nenhuma_operacao",
     "B1": "comprar_e_segurar",
     "B2": "entradas_aleatorias",
     "B3": "rompimento_60",
 }
-
-
-class Fetcher(Protocol):
-    def fetch(self, key: str, local: Path) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -83,7 +77,7 @@ def run_baselines(
     who: str,
     clock: Callable[[], datetime],
 ) -> BaselineReport:
-    manifest = _manifest(request.dataset_id, datasets_dir, fetcher)
+    manifest = read_manifest(request.dataset_id, datasets_dir, fetcher)
     identity = manifest["identity"]
     final = bool(manifest["final_evaluation"])
     if final and not request.final_evaluation:
@@ -127,16 +121,6 @@ def run_baselines(
     return report
 
 
-def _manifest(dataset_id: str, datasets_dir: Path, fetcher: Fetcher) -> dict[str, Any]:
-    path = datasets_dir / f"{dataset_id}.manifest.json"
-    if not path.exists():
-        fetcher.fetch(f"{DATASETS}/{dataset_id}/manifest.json", path)
-    manifest: dict[str, Any] = json.loads(path.read_text())
-    if manifest.get("dataset_id") != dataset_id:
-        raise ValueError(f"manifesto de outro dataset em {path}")
-    return manifest
-
-
 def _run(
     request: BaselineRequest,
     manifest: dict[str, Any],
@@ -146,11 +130,7 @@ def _run(
     first: date,
     last: date,
 ) -> BaselineReport:
-    path = datasets_dir / f"{request.dataset_id}.parquet"
-    if not path.exists():
-        fetcher.fetch(f"{DATASETS}/{request.dataset_id}/data.parquet", path)
-    if file_sha256(path) != manifest["parquet_sha256"]:
-        raise ValueError(f"{path}: SHA-256 diferente do manifesto")
+    path = dataset_file(request.dataset_id, manifest, datasets_dir, fetcher)
     market = Market.from_table(pq.read_table(path))
     window = market.window(first, last)
     h = request.horizon

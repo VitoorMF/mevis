@@ -6,6 +6,10 @@ dataset (RF-271) e termina como "ok" ou "erro", com as tentativas avaliadas e as
 JSON em `derived/experiments/` (`<id>.start.json`, `<id>.result.json`, `<id>.discard.json`), de
 onde o SQLite pode ser refeito (RF-275).
 
+Uma execução de modelo guarda também o resultado do procedimento (`outcome`: escolhas por dobra,
+abstenções, métricas do teste) e arquivos auxiliares, como as previsões, em
+`derived/experiments/<id>/`, com o SHA-256 no registro de fim (RF-245).
+
 O número de tentativas de uma trilha, usado no IS-15, é o de identificações de configuração
 distintas, com métricas, nas execuções de modelo da trilha; repetições, execuções com erro sem
 métricas e baselines não somam (RF-274; DEC-38).
@@ -64,6 +68,11 @@ CREATE TABLE IF NOT EXISTS trials (
     metrics TEXT NOT NULL,
     PRIMARY KEY (execution_id, config_id)
 );
+CREATE TABLE IF NOT EXISTS outcomes (
+    execution_id TEXT PRIMARY KEY REFERENCES executions (id),
+    outcome TEXT NOT NULL,
+    artifacts TEXT NOT NULL
+);
 """
 
 
@@ -98,6 +107,7 @@ class Registry:
         self.path = path
         self.store = store
         self.records = path.parent / "records"
+        self.artifacts = path.parent / "artifacts"
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(path)
         self._db.row_factory = sqlite3.Row
@@ -157,11 +167,15 @@ class Registry:
         trials: Sequence[Trial],
         now: datetime,
         error: str | None = None,
+        outcome: Mapping[str, Any] | None = None,
+        artifacts: Mapping[str, str] | None = None,
     ) -> None:
-        """Fecha a execução com as tentativas avaliadas, mesmo quando termina com erro (RF-272)."""
+        """Fecha a execução com as tentativas avaliadas, mesmo quando termina com erro (RF-272).
+
+        `artifacts` leva o nome e o SHA-256 de cada arquivo já enviado com `put_artifact`."""
         if self._row(execution_id)["status"] != "running":
             raise ValueError(f"execução já terminada: {execution_id}")
-        record = {
+        record: dict[str, Any] = {
             "stage": "result",
             "id": execution_id,
             "status": "error" if error else "ok",
@@ -169,6 +183,9 @@ class Registry:
             "error": error,
             "trials": [trial.to_dict() for trial in trials],
         }
+        if outcome is not None:
+            record["outcome"] = dict(outcome)
+            record["artifacts"] = dict(artifacts or {})
         with self._db:
             self._apply(record)
         self._publish(f"{execution_id}.result.json", record)
@@ -188,6 +205,28 @@ class Registry:
         with self._db:
             self._apply(record)
         self._publish(f"{execution_id}.discard.json", record)
+
+    def put_artifact(self, execution_id: str, local: Path) -> str:
+        """Envia um arquivo da execução para `derived/experiments/<id>/` e devolve o SHA-256."""
+        if self._row(execution_id)["status"] != "running":
+            raise ValueError(f"execução já terminada: {execution_id}")
+        sha = file_sha256(local)
+        self.store.put(local, artifact_key(execution_id, local.name), sha)
+        return sha
+
+    def artifact(self, execution_id: str, name: str) -> Path:
+        """Caminho local de um arquivo da execução, baixado se faltar, conferido pelo SHA-256."""
+        shown = self.show(execution_id)
+        expected = shown.get("artifacts", {}).get(name)
+        if expected is None:
+            raise ValueError(f"execução {execution_id} sem o arquivo {name}")
+        local = self.artifacts / execution_id / name
+        if not local.exists():
+            local.parent.mkdir(parents=True, exist_ok=True)
+            self.store.get(artifact_key(execution_id, name), local, expected)
+        elif file_sha256(local) != expected:
+            raise ValueError(f"{local}: SHA-256 diferente do registro")
+        return local
 
     # ------------------------------------------------------------------ leitura
 
@@ -225,7 +264,46 @@ class Registry:
             }
             for row in rows
         ]
+        outcome = self._db.execute(
+            "SELECT outcome, artifacts FROM outcomes WHERE execution_id = ?", (execution_id,)
+        ).fetchone()
+        if outcome is not None:
+            execution["outcome"] = json.loads(outcome["outcome"])
+            execution["artifacts"] = json.loads(outcome["artifacts"])
         return execution
+
+    def latest(self, dataset_id: str, kind: str = "model") -> list[dict[str, Any]]:
+        """A execução terminada mais recente, não descartada, de cada degrau, horizonte e modelo
+        do dataset (RF-281)."""
+        rows = self._db.execute(
+            """
+            SELECT * FROM executions
+            WHERE dataset_id = ? AND kind = ? AND status = 'ok' AND discarded_at IS NULL
+            ORDER BY id
+            """,
+            (dataset_id, kind),
+        ).fetchall()
+        chosen: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for row in rows:
+            execution = self._execution(row)
+            spec = execution["spec"]
+            key = (json.dumps(spec["rungs"]), json.dumps(spec["horizons"]), str(spec["model"]))
+            chosen[key] = execution
+        return [self.show(e["id"]) for e in chosen.values()]
+
+    def trial_metrics(self, track: str) -> dict[str, dict[str, Any]]:
+        """Métricas de cada tentativa da trilha, pela execução de modelo mais recente que a
+        avaliou: as mesmas tentativas que `count` conta (RF-274, RF-278)."""
+        rows = self._db.execute(
+            """
+            SELECT t.config_id, t.metrics FROM trials t
+            JOIN executions e ON e.id = t.execution_id
+            WHERE e.kind = 'model' AND e.track = ?
+            ORDER BY e.id
+            """,
+            (track,),
+        ).fetchall()
+        return {row["config_id"]: json.loads(row["metrics"]) for row in rows}
 
     # ------------------------------------------------------------------ interno
 
@@ -280,6 +358,15 @@ class Registry:
                     for trial in record["trials"]
                 ],
             )
+            if record.get("outcome") is not None:
+                self._db.execute(
+                    "INSERT INTO outcomes (execution_id, outcome, artifacts) VALUES (?, ?, ?)",
+                    (
+                        record["id"],
+                        json.dumps(record["outcome"], sort_keys=True),
+                        json.dumps(record.get("artifacts", {}), sort_keys=True),
+                    ),
+                )
         elif stage == "discard":
             self._db.execute(
                 "UPDATE executions SET discarded_at = ?, discard_reason = ? WHERE id = ?",
@@ -296,6 +383,10 @@ class Registry:
         local.parent.mkdir(parents=True, exist_ok=True)
         local.write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
         self.store.put(local, f"{EXPERIMENTS}/{name}", file_sha256(local))
+
+
+def artifact_key(execution_id: str, name: str) -> str:
+    return f"{EXPERIMENTS}/{execution_id}/{name}"
 
 
 def rebuild(path: Path, records: Iterable[Mapping[str, Any]], store: ObjectStore) -> Registry:

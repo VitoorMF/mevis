@@ -4,9 +4,9 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 04 — AI & Quantitative Research |
-| Versão | 1.6 — aprovado |
+| Versão | 1.7 — aprovado |
 | Escopo desta versão | Método de pesquisa da V0.2: dados e períodos, formulação do problema, features, baselines, modelos, validação, custos, métricas, critérios de G2 a pré-registrar, registro de experimentos e plano de trabalho. |
-| Status | Aprovado em 26/10/2026 (DEC-28); v1.4 aprovada em 07/11/2026 (DEC-35); v1.5 aprovada em 07/11/2026 (DEC-37), com a etapa 3 (DEC-36); v1.6 aprovada em 07/11/2026 (DEC-39), com as etapas 4 e 5 (DEC-38). Decisões PD-15 a PD-23 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
+| Status | Aprovado em 26/10/2026 (DEC-28); v1.4 aprovada em 07/11/2026 (DEC-35); v1.5 aprovada em 07/11/2026 (DEC-37), com a etapa 3 (DEC-36); v1.6 aprovada em 07/11/2026 (DEC-39), com as etapas 4 e 5 (DEC-38); v1.7 aprovada em 08/11/2026 (DEC-42), com a etapa 6 (DEC-41). Decisões PD-15 a PD-23 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
 | Data | 26/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.8; [02 — SRS](02-srs.md) v0.5; [03 — Architecture](03-architecture.md) v0.8; [06 — Data & Integrations](06-data-integrations.md) v0.8 |
 
@@ -289,6 +289,17 @@ As famílias são cumulativas: o ponto vale para o degrau B5 se for válido em c
 
 Grade pequena é deliberada: cada combinação conta como tentativa na correção por testes múltiplos (IS-15).
 
+**Grade de τ mantida [DECISÃO] DEC-41 (PD-42, 08/11/2026).** No desenvolvimento da trilha A, só 11,4% (H = 15) e 23,7% (H = 60) dos pontos elegíveis têm alvo positivo (doc 03, MD-31), então p > 0,50 exige um sinal forte, e o modelo pode operar pouco. A grade fica como está porque, com retornos aproximadamente simétricos em torno da média, p = P(r > 0) > 0,50 é o ponto a partir do qual o retorno líquido esperado é positivo; abaixo disso, a operação tende a ter perda esperada. O risco aceito é ter poucas operações, sobretudo com H = 15, e um holdout inconclusivo pelo IS-17.
+
+**Detalhes (v1.7, etapa 6):**
+
+- **Features por degrau:** B4 usa as 18 de candles; B5, essas e as 7 de volume (25); B6, essas e as 12 de fluxo (37), conforme o catálogo de §5.2. As do livro nunca entram na trilha A. Os modelos não leem a validade, o alvo, os preços nem as colunas de simulação do dataset.
+- **Linhas de treino:** todos os pontos elegíveis do horizonte (§4.4) no trecho de treino, depois da purga (§8.1). Os alvos de minutos vizinhos se sobrepõem; não há subamostragem nem peso, porque toda avaliação é fora da amostra.
+- **Regressão logística:** features padronizadas pela média e pelo desvio do trecho em que o modelo é ajustado; penalidade L2 com o C da grade; implementação do scikit-learn.
+- **XGBoost:** objetivo logístico binário, árvores por histograma, os valores da grade, semente 0 e número fixo de threads, para que as mesmas entradas deem as mesmas previsões.
+- **Semente:** uma só (0) em todas as configurações; outra semente seria outra tentativa (§11).
+- **Papel da logística:** referência linear, nunca candidata a G2. As configurações dela contam como tentativas (DEC-38). Na trilha A, são 3 degraus × 2 horizontes × (2 × 5 da logística + 4 × 5 do XGBoost) = 180 tentativas.
+
 ---
 
 ## 8. Validação
@@ -304,13 +315,36 @@ Grade pequena é deliberada: cada combinação conta como tentativa na correçã
 - **Embargo:** como a janela só avança no tempo, não há treino depois do teste; nenhum embargo adicional.
 - Os resultados de desenvolvimento são a concatenação das dobras de teste.
 
+**Dobras da trilha A (v1.7).** Os meses do desenvolvimento vão do dia 23 ao dia 22 do mês seguinte, em dias UTC inteiros: m1 = 23/10 a 22/11/2025, …, m9 = 23/06 a 22/07/2026. Em cada dobra, o modelo é ajustado num trecho, comparado no mês de validação (§8.2) e ajustado de novo em todo o treino da dobra antes do teste.
+
+| Dobra | Ajuste para a validação | Validação | Treino final da dobra | Teste |
+|---|---|---|---|---|
+| D1 | m1 e m2 | m3 | m1 a m3 | m4 (23/01 a 22/02/2026) |
+| D2 | m1 a m3 | m4 | m1 a m4 | m5 (23/02 a 22/03/2026) |
+| D3 | m1 a m4 | m5 | m1 a m5 | m6 (23/03 a 22/04/2026) |
+| D4 | m1 a m5 | m6 | m1 a m6 | m7 (23/04 a 22/05/2026) |
+| D5 | m1 a m6 | m7 | m1 a m7 | m8 (23/05 a 22/06/2026) |
+| D6 | m1 a m7 | m8 | m1 a m8 | m9 (23/06 a 22/07/2026) |
+| Holdout (etapa 7) | m1 a m8 | m9 | m1 a m9 | 23/07 a 22/10/2026 |
+
+A purga tira de cada trecho de ajuste ou de treino os pontos t cuja saída, no minuto t + 1 + H, cai depois do início da janela seguinte. Numa janela de validação ou de teste, só entram os pontos e as operações cuja saída cai dentro dela (§10.1). As features no início de uma janela usam minutos anteriores a ela, o que é permitido: são dados disponíveis em t_d, e nenhum alvo atravessa a fronteira.
+
 ### 8.2 Validação interna (dentro do treino de cada dobra)
 
 O último mês (trilha A) ou a última semana (trilha B) do treino de cada dobra serve para escolher hiperparâmetros e τ, também com purga. O teste da dobra nunca participa dessa escolha.
 
+**Seleção [DECISÃO] DEC-41 (PD-39 e PD-40, 08/11/2026).** Em cada dobra, para cada degrau, horizonte e modelo:
+
+1. **Hiperparâmetros pelo log loss.** Cada combinação da grade é ajustada no trecho de ajuste e prevê p nos pontos da validação. Fica a de menor log loss; num empate, a primeira da grade.
+2. **τ pelo Sharpe.** Com as previsões dessa combinação, cada τ da grade é simulado na validação, no cenário base. Entre os τ com pelo menos 20 operações, fica o de maior Sharpe; num empate, o maior τ.
+3. **Abstenção.** Se nenhum τ tiver 20 operações, ou se o Sharpe do escolhido não for positivo, a estratégia não opera no mês de teste: resultado zero, registrado como abstenção.
+4. **Teste.** Senão, a combinação escolhida é ajustada de novo em todo o treino da dobra, com purga, e opera no mês de teste com o τ escolhido, nos sete cenários de §9.
+
+Motivo: um mês de operações simuladas (~30 retornos diários) é pouco para comparar 10 a 20 combinações sem escolher pelo acaso; o log loss usa todos os ~40 mil pontos do mês. O τ continua escolhido pelo resultado da operação, porque é ele que define as operações. A abstenção é o que faria quem não viu vantagem; o procedimento inteiro, inclusive ela, é a estratégia avaliada. Um mês de abstenção não conta como positivo no IS-18.
+
 ### 8.3 Holdout
 
-Depois do desenvolvimento, para cada degrau e horizonte, o modelo final é treinado com todo o período de desenvolvimento, com os hiperparâmetros e τ escolhidos pelo mesmo processo, e avaliado uma vez no holdout (§3.3).
+Depois do desenvolvimento, para cada degrau e horizonte, o modelo final é treinado com todo o período de desenvolvimento, com os hiperparâmetros e τ escolhidos pelo mesmo processo, e avaliado uma vez no holdout (§3.3). Pelo mesmo processo, ele se abstém no holdout se a validação em m9 não mostrar vantagem (DEC-41); o holdout fica então sem operações e inconclusivo pelo IS-17.
 
 ---
 
@@ -364,6 +398,24 @@ Ordens a mercado (taker) são a hipótese conservadora; executar como maker (ord
 - **Expectativa líquida por operação:** média dos retornos líquidos das operações, em pontos-base. **Taxa de acerto:** fração das operações com retorno líquido > 0. **Exposição:** operações × H / minutos da janela.
 - **Estatísticas dos critérios de G2** (bootstrap do IS-14, DSR do IS-15 e comparações das ablações): entram na etapa 6, a primeira que as usa. O registro (§11) já guarda o que o DSR precisa.
 
+**Estatísticas (v1.7, etapa 6):**
+
+- **Bootstrap do IS-14:** blocos de um dia UTC. Cada amostra sorteia, com reposição, tantos dias quantos a janela tem; a expectativa da amostra é a média dos retornos líquidos das operações cuja saída cai nos dias sorteados, repetidas tantas vezes quantas o dia saiu. São 10.000 amostras, com semente registrada; o intervalo de 95% vai do percentil 2,5 ao 97,5. Amostras sem nenhuma operação ficam fora e são contadas.
+- **DSR do IS-15 [DECISÃO] DEC-41 (PD-41, 08/11/2026):** DSR = Φ((SR − SR₀) · √(T − 1) / √(1 − γ₃ · SR + (γ₄ − 1) / 4 · SR²)), com SR₀ = √V · ((1 − γ) · Φ⁻¹(1 − 1/N) + γ · Φ⁻¹(1 − 1/(N · e))) e γ ≈ 0,5772 (constante de Euler-Mascheroni).
+  - SR, T, γ₃ e γ₄ são o Sharpe sem anualizar, o número de dias, a assimetria e a curtose dos retornos diários da janela avaliada: o holdout, na etapa 7.
+  - N é o número de tentativas da trilha (§11).
+  - V é a variância, entre as tentativas, do Sharpe diário sem anualizar de cada uma nos meses de validação interna juntos (m3 a m8 na trilha A), que são onde as configurações foram comparadas. Uma tentativa sem operação nesses meses tem Sharpe zero.
+  - Na etapa 6, o relatório calcula o DSR também sobre as dobras de teste juntas, só como informação; o que decide o IS-15 é o do holdout.
+- **Ablações:** bootstrap pareado, com os mesmos dias sorteados para os dois degraus, da diferença de expectativa por operação e da diferença de Sharpe dos retornos diários; 10.000 amostras. Há ganho incremental se o percentil 2,5 da diferença for maior que zero. Pares, em cada horizonte: B5 − B4 (H-02) e B6 − B5 (H-03, parte 1). No desenvolvimento, sobre as dobras de teste juntas; no holdout, na etapa 7.
+- **Relatório de desenvolvimento (F-20):** para cada degrau e horizonte, com o XGBoost como modelo principal e a logística como referência:
+  - as escolhas de cada dobra (hiperparâmetros, τ, abstenção) e as métricas de cada dobra nos cenários base e estresse;
+  - as métricas das dobras juntas nos quatro cenários relatados;
+  - AUC e log loss do teste em cada dobra, e a importância das features;
+  - o intervalo do IS-14, o DSR informativo e as comparações do IS-16 com B0, B1, B3 e B2 (B2 com o número de operações do modelo em cada dobra);
+  - as dobras positivas (IS-18), o resultado no estresse e o drawdown (IS-19), e as ablações.
+
+  O desenvolvimento não aprova nada: G2 se decide no holdout (§10.2), menos o IS-18, que já é medido aqui.
+
 ### 10.2 Critérios de G2 [DECISÃO] PD-21 — pré-registrados em 26/10/2026
 
 Um modelo passa em G2 se, **no holdout**, atender a todos:
@@ -396,6 +448,7 @@ Os critérios estão congelados desde 26/10/2026 (commit que registra esta vers�
   - Uma execução avalia uma ou mais **tentativas**: cada configuração de degrau, horizonte, modelo, hiperparâmetros, τ e semente, com o catálogo de features e os parâmetros do alvo. A identificação da configuração é um resumo SHA-256 desses itens, sem a versão do código, o período e o dataset: a mesma configuração refeita depois de corrigir um defeito, ou em outro período, é a mesma tentativa.
   - Os estados da execução são "em andamento" (gravado antes de ler o dataset), "ok" e "erro" (com a mensagem). "Descartada" é uma marca posterior, com motivo, que não apaga nada.
   - Os baselines também são registrados, como execuções do tipo baseline.
+  - **Execução de modelo (v1.7):** cobre uma trilha, um degrau, um horizonte e um modelo. As tentativas são as combinações de hiperparâmetros e τ da grade, com as métricas de cada mês de validação. O resultado do procedimento (escolhas por dobra, abstenções, métricas do teste e diagnósticos) fica junto da execução, com as previsões de validação e de teste, para refazer o relatório sem treinar de novo.
 - **Contagem do IS-15 [DECISÃO] DEC-38:** o número de tentativas de uma trilha é o de identificações de configuração distintas, com métricas, nas execuções de modelo da trilha. Execuções com erro e baselines ficam no registro, mas não contam.
 - Armazenamento: SQLite local no MacBook, exportado para `derived/experiments/` no S3 a cada execução. Sem MLflow ou serviços externos (PP-07). Cada execução grava `<id>.start.json` antes de rodar, `<id>.result.json` ao terminar e `<id>.discard.json` se for descartada; nada é substituído, e o SQLite pode ser refeito a partir desses registros.
 
@@ -459,10 +512,10 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | p99 do atraso ao vivo (PD-19) | **Resolvido:** 119 ms em negócios e 174 ms em candles na semana do CA-01 (doc 06 §8.6); L = 1 s mantida |
 | Modelo de preenchimento final e limites de drawdown | Doc 05 |
 | Degradação tolerada paper × backtest (H-05) | Doc 07 |
-| Requisitos RF-201 a RF-289 | SRS, antes de cada etapa: RF-201 a RF-213 (etapa 2, features) no SRS v0.10; RF-221 a RF-229 (etapa 3, datasets) no SRS v0.11 |
+| Requisitos RF-201 a RF-289 | SRS, antes de cada etapa: RF-201 a RF-213 (etapa 2, features) no SRS v0.10; RF-221 a RF-229 (etapa 3, datasets) no SRS v0.11; RF-231 a RF-276 (etapas 4 e 5) no SRS v0.12; RF-235 a RF-247 e RF-277 a RF-282 (etapa 6) no SRS v0.13 |
 | Comparar os degraus de uma trilha nos mesmos pontos | **Resolvido em 07/11/2026 (DEC-36):** todos usam os pontos válidos no degrau mais alto da trilha e com alvo válido (§4.4) |
 | Regra do preço de execução no estudo de robustez de 2023 a 2025, que só tem candles (§3.2) | Quando o estudo for planejado, depois dos resultados da trilha A (DEC-36) |
-| Como o DSR (IS-15) estima a variância dos Sharpe entre as tentativas, já que hiperparâmetros e τ são escolhidos na validação interna (§8.2) | Etapa 6, antes de rodar os modelos |
+| Como o DSR (IS-15) estima a variância dos Sharpe entre as tentativas, já que hiperparâmetros e τ são escolhidos na validação interna (§8.2) | **Resolvido em 08/11/2026 (DEC-41):** pelo Sharpe de cada tentativa nos meses de validação interna (§10.1) |
 
 ---
 
@@ -496,3 +549,4 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | 1.4 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-35), com os requisitos da etapa 2. DEC-34: §5.1, janelas fixas e valor indefinido tornando o ponto inválido; §5.2, ajustes do catálogo (desequilíbrio assinado relativo ao volume de 24 h, taxa de chegada fora de B6, janelas que faltavam); §5.3, definições exatas das 59 features, minuto válido, disponibilidade e ponto válido; §12, `numpy`. |
 | 1.5 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-37), com os requisitos da etapa 3. DEC-36: §4.3, cálculo exato do retorno líquido e validade do alvo; §4.4, pontos elegíveis iguais para todos os degraus da trilha; §9, taxa verificada e preço de execução por minuto a partir dos negócios; §11, uma tabela por trilha e período e registro de acesso ao holdout; §3.2 e §15, regra de preço do estudo de robustez adiada; §13, etapa 3 atualizada. |
 | 1.6 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-39), com os requisitos das etapas 4 e 5. DEC-38: §9, cenários de custo, com o de estresse juntando taxa, deslizamento e latência; §10.1, capital marcado minuto a minuto; §10.2, esclarecimentos do IS-15 (configurações distintas) e do IS-19 (cenário de estresse e drawdown), antes de qualquer avaliação do holdout; §11, colunas de simulação no dataset e contagem de tentativas. Também: §4.4, momento do próximo sinal; §6, detalhes dos baselines; §10.1, janela e definições das métricas; §11, detalhes do registro; §13 e §15, estatísticas de G2 e variância do DSR na etapa 6. |
+| 1.7 | 08/11/2026 | Aprovado em 08/11/2026 (DEC-42), com os requisitos da etapa 6. DEC-41: §7, grade de τ mantida; §8.2, hiperparâmetros pelo log loss, τ pelo Sharpe com pelo menos 20 operações e abstenção sem vantagem; §10.1, variância do DSR pelos meses de validação. Também: §7, features por degrau, linhas de treino, implementação dos modelos e 180 tentativas na trilha A; §8.1, meses e dobras da trilha A e purga; §8.3, abstenção no holdout; §10.1, bootstrap, DSR, ablações e relatório de desenvolvimento; §11, execução de modelo; §15, pendência do DSR resolvida. |

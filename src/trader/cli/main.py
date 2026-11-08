@@ -1,6 +1,7 @@
 """Linha de comando: `collect`, `collector-ready`, `status`, `pipeline`, `reconcile`, `backfill`,
-`aggregates`, `features`, `dataset`, `baselines`, `experiments`, `quality`, `dashboard-data`,
-`status-publisher` e `smoke` (RF-181 a RF-187, RF-213, RF-229, RF-257, RF-276)."""
+`aggregates`, `features`, `dataset`, `baselines`, `experiments`, `walkforward`, `report`, `quality`,
+`dashboard-data`, `status-publisher` e `smoke` (RF-181 a RF-187, RF-213, RF-229, RF-247, RF-257,
+RF-276, RF-282)."""
 
 import argparse
 import asyncio
@@ -59,6 +60,8 @@ PIPELINE_COMMANDS = (
     "dataset",
     "baselines",
     "experiments",
+    "walkforward",
+    "report",
     "quality",
     "dashboard-data",
     "status-publisher",
@@ -66,6 +69,8 @@ PIPELINE_COMMANDS = (
 """Comandos configurados pela tabela `[pipeline]`."""
 REGISTRY = Path("data/experiments/registry.sqlite")
 """Registro de experimentos no MacBook, fora do Git (doc 03 §5.3)."""
+REPORTS = Path("data/reports")
+"""Relatórios de desenvolvimento no MacBook, fora do Git (doc 03 §5.4)."""
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -188,6 +193,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     experiments.add_argument("--replica-dir", type=Path, help="réplica local (desenvolvimento)")
     experiments.add_argument("--registry", type=Path, default=REGISTRY, help="SQLite do registro")
 
+    walkforward = commands.add_parser(
+        "walkforward", help="walk-forward de B4 a B6 num dataset de desenvolvimento (RF-247)"
+    )
+    walkforward.add_argument("--config", type=Path, help="TOML com replica_s3_bucket (S3)")
+    walkforward.add_argument("--data-dir", type=Path, help="diretório de dados (sem S3)")
+    walkforward.add_argument("--replica-dir", type=Path, help="réplica local (desenvolvimento)")
+    walkforward.add_argument("--dataset", required=True, help="id do dataset (RF-227)")
+    walkforward.add_argument("--rungs", type=_names, default=("B4", "B5", "B6"), help="B4,B5,B6")
+    walkforward.add_argument("--horizons", type=_ints, default=(15, 60), help="15,60")
+    walkforward.add_argument(
+        "--models", type=_names, default=("logistic", "xgboost"), help="logistic,xgboost"
+    )
+    walkforward.add_argument("--seed", type=int, default=0, help="semente dos modelos")
+    walkforward.add_argument(
+        "--datasets-dir", type=Path, default=Path("data/datasets"), help="cache dos datasets"
+    )
+    walkforward.add_argument("--registry", type=Path, default=REGISTRY, help="SQLite do registro")
+
+    report = commands.add_parser(
+        "report", help="relatório de desenvolvimento a partir do registro (RF-282)"
+    )
+    report.add_argument("--config", type=Path, help="TOML com replica_s3_bucket (S3)")
+    report.add_argument("--data-dir", type=Path, help="diretório de dados (sem S3)")
+    report.add_argument("--replica-dir", type=Path, help="réplica local (desenvolvimento)")
+    report.add_argument("--dataset", required=True, help="id do dataset (RF-227)")
+    report.add_argument("--seed", type=int, default=0, help="semente do bootstrap e de B2")
+    report.add_argument(
+        "--datasets-dir", type=Path, default=Path("data/datasets"), help="cache dos datasets"
+    )
+    report.add_argument("--registry", type=Path, default=REGISTRY, help="SQLite do registro")
+    report.add_argument("--reports-dir", type=Path, default=REPORTS, help="onde gravar o Markdown")
+
     quality = commands.add_parser(
         "quality", help="relatório de qualidade de um período (doc 06 §8.3)"
     )
@@ -276,6 +313,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_baselines(pipeline_config, args)
     if args.command == "experiments":
         return run_experiments(pipeline_config, args)
+    if args.command == "walkforward":
+        return run_walkforward(pipeline_config, args)
+    if args.command == "report":
+        return run_report(pipeline_config, args)
     if args.command == "quality":
         return quality_report(pipeline_config, args.start, args.end, args.json)
     if args.command == "dashboard-data":
@@ -794,6 +835,127 @@ def run_baselines(config: PipelineConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def _names(text: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in text.split(",") if part.strip())
+
+
+def _ints(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in _names(text))
+
+
+def run_walkforward(config: PipelineConfig, args: argparse.Namespace) -> int:
+    """Walk-forward da etapa 6, uma execução por degrau, horizonte e modelo (RF-247). `numpy`,
+    `scikit-learn` e `xgboost` só são importados aqui (RNF-029)."""
+    try:
+        from trader.experiments.registry import Registry
+        from trader.pipeline.datasets import code_version
+        from trader.pipeline.walkforward import TaskResult, WalkForwardRequest
+        from trader.pipeline.walkforward import run_walkforward as run
+    except ImportError as exc:
+        print(f"falta o grupo de pesquisa (numpy, scikit-learn, xgboost): {exc}", file=sys.stderr)
+        return 2
+
+    began = time.monotonic()
+    store = _research_store(config)
+    code = code_version()
+    if code.endswith(".dirty"):
+        print(f"aviso: código com mudanças sem commit ({code})", file=sys.stderr)
+    request = WalkForwardRequest(args.dataset, args.rungs, args.horizons, args.models, args.seed)
+
+    def show(done: TaskResult) -> None:
+        t = done.task
+        print(
+            f"{done.execution_id} · {t.rung} · H = {t.horizon} min · {t.model}"
+            f" · {done.seconds:.0f} s",
+            flush=True,
+        )
+        if done.result is None:
+            print(f"  erro: {done.error}", flush=True)
+            return
+        for f in done.result.folds:
+            params = " ".join(f"{k}={v}" for k, v in done.result.grid[f.chosen].items())
+            base = f.test.paths["base"]
+            if f.abstained:
+                choice = "abstenção"
+            else:
+                choice = f"τ {f.tau:.2f} · {len(base.returns)} operações"
+            ret = float(base.equity[-1]) - 1
+            print(f"  {f.fold.name} {f.fold.test.label}  {params}  {choice}  {ret:+.2%}")
+        for name, m in done.result.combined().items():
+            if name not in ("base", "estresse"):
+                continue
+            sharpe = "—" if m.sharpe is None else f"{m.sharpe:.2f}"
+            print(
+                f"  dobras juntas, {name}: {m.trades} operações · {m.expectancy_bps:.1f} pb"
+                f" · retorno {m.total_return:+.2%} · Sharpe {sharpe}"
+                f" · drawdown {m.max_drawdown:.2%}",
+                flush=True,
+            )
+
+    with Registry(args.registry, store) as registry:
+        try:
+            results = run(
+                request,
+                datasets_dir=args.datasets_dir,
+                fetcher=store,
+                registry=registry,
+                code=code,
+                who=_who(),
+                clock=lambda: datetime.now(UTC),
+                on_result=show,
+            )
+        except HoldoutRefused as exc:
+            print(f"recusado: {exc}", file=sys.stderr)
+            return 2
+        except (ValueError, StorageError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        failed = [r for r in results if r.error]
+        print(
+            f"{len(results) - len(failed)} de {len(results)} execuções ok"
+            f" · tempo: {time.monotonic() - began:.0f} s · pico de memória: {_peak_mb():.0f} MB"
+        )
+    print(f"→ {args.registry}, derived/experiments/<id>.*.json e <id>/predictions.parquet")
+    return 1 if failed else 0
+
+
+def run_report(config: PipelineConfig, args: argparse.Namespace) -> int:
+    """Relatório de desenvolvimento a partir do registro e das previsões (RF-282)."""
+    try:
+        from trader.experiments.registry import Registry
+        from trader.pipeline.datasets import code_version
+        from trader.pipeline.report import build_report as build
+    except ImportError as exc:
+        print(f"falta o grupo de pesquisa (numpy): {exc}", file=sys.stderr)
+        return 2
+
+    began = time.monotonic()
+    store = _research_store(config)
+    with Registry(args.registry, store) as registry:
+        try:
+            report = build(
+                args.dataset,
+                datasets_dir=args.datasets_dir,
+                fetcher=store,
+                store=store,
+                registry=registry,
+                reports_dir=args.reports_dir,
+                seed=args.seed,
+                code=code_version(),
+                clock=lambda: datetime.now(UTC),
+            )
+        except HoldoutRefused as exc:
+            print(f"recusado: {exc}", file=sys.stderr)
+            return 2
+        except (ValueError, StorageError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    print(report.summary)
+    print(f"tempo: {time.monotonic() - began:.1f} s · pico de memória: {_peak_mb():.0f} MB")
+    print(f"→ {report.path} e {report.key}")
+    return 0
+
+
 def run_experiments(config: PipelineConfig, args: argparse.Namespace) -> int:
     """Consulta e manutenção do registro de experimentos (RF-276). Não usa `numpy`."""
     from trader.experiments.registry import EXPERIMENTS, Registry, rebuild
@@ -803,7 +965,10 @@ def run_experiments(config: PipelineConfig, args: argparse.Namespace) -> int:
         downloads = args.registry.parent / "records-s3"
         records = []
         for key in store.list_keys(EXPERIMENTS + "/"):
-            local = downloads / key.rsplit("/", 1)[1]
+            name = key.removeprefix(EXPERIMENTS + "/")
+            if "/" in name or not name.endswith(".json"):
+                continue  # arquivos auxiliares das execuções, como as previsões
+            local = downloads / name
             store.fetch(key, local)
             records.append(json.loads(local.read_text()))
         with rebuild(args.registry, records, store) as registry:

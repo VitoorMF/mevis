@@ -41,7 +41,10 @@ strict = true
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["pyarrow", "pyarrow.*", "boto3", "boto3.*", "botocore", "botocore.*"]
+module = [
+    "pyarrow", "pyarrow.*", "boto3", "boto3.*", "botocore", "botocore.*",
+    "sklearn", "sklearn.*", "scipy", "scipy.*",
+]
 ignore_missing_imports = true
 
 [dependency-groups]
@@ -53,8 +56,10 @@ dev = [
 ]
 pesquisa = [
     "numpy>=2.5.4",
+    "scikit-learn>=1.9.1",
+    "xgboost>=3.4.1",
 ]
 
 [tool.uv]
-# O grupo `pesquisa` (numpy, DEC-34) fica fora do artefato do host até a V0.3 (RNF-029).
+# O grupo `pesquisa` (numpy, DEC-34; xgboost e scikit-learn, DEC-41) fica fora do artefato do host até a V0.3 (RNF-029).
 default-groups = ["dev", "pesquisa"]
