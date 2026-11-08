@@ -424,7 +424,21 @@ O tempo de ajuste depende do tamanho, não dos valores. Resultados:
   - As previsões ocupam 118 MB nas 12 execuções, como estimado.
 - **Relatório** das 12 execuções: 5,2 s, com pico de ~600 MB, 180 tentativas contadas e as seis dobras de teste.
 - **Dataset oficial.** Antes da medição, uma contagem confirmou que todos os pontos elegíveis têm alvo válido e as 37 features definidas, e que nenhum dado do holdout foi lido.
-- **Execução oficial.** Roda depois do commit, para que a versão do código não leve `.dirty`. O tempo dela entra aqui quando acontecer.
+- **Execução oficial.** Rodou depois do commit `4e4233b`, sem `.dirty`, no dataset `1f96ddf76ce5e058`.
+  - 12 de 12 execuções ok, de `exp-20261108T143258.866088Z` a `exp-20261108T144235.039908Z`, em 12 min 44 s, com pico de 1,27 GiB. É mais lenta que a sintética porque as features reais pedem mais divisões ao XGBoost: até 187 s numa execução de B6.
+  - A contagem do IS-15 passou a 180 tentativas na trilha A.
+  - O relatório `rep-20261108T144556.278777Z` levou 3,1 s, com pico de ~610 MB. Está em `data/reports/` e em `derived/reports/`.
+- **Resultados, só do desenvolvimento** (dobras de teste juntas, 23/01 a 22/07/2026; holdout não lido):
+  - **H = 15:** todos os modelos se abstiveram nas 6 dobras. Nenhum τ teve Sharpe positivo com pelo menos 20 operações na validação.
+  - **H = 60:** o XGBoost se absteve em 17 das 18 dobras. A exceção foi B5 em D3: 19 operações, −5,5%. A logística (referência) operou em D3 e D6 em todos os degraus, de 16 a 30 operações, e perdeu de 4,6% a 7,3%.
+  - **AUC no teste:** de 0,65 a 0,73 com H = 15 e de 0,58 a 0,64 com H = 60. As features mais importantes são as de volatilidade (`rvol_60`, `rvol_15`, `range_15`).
+    - [HIPÓTESE] O modelo prevê melhor *se* haverá um movimento grande do que a direção dele. Como o alvo exige vencer ~22 pb de custos, mais volatilidade aumenta a chance de alvo positivo, mas também a de perda. A probabilidade quase nunca passa de 0,50 com retorno positivo, e o resultado é a abstenção.
+  - **Baselines:**
+    - B1: −27,2%, Sharpe −1,07.
+    - B3: expectativa de −22,5 pb (H = 15) e −23,0 pb (H = 60), perto do custo de ida e volta; capital perto de zero.
+    - B0: zero.
+  - **Prévia de G2:** nenhuma estratégia passa. IS-17 tem no máximo 30 operações. Os IC 95% da expectativa ficam abaixo de zero ou cruzam o zero. Com o XGBoost sem operações, o DSR e as ablações ficam vazios.
+  - Pelo §8.3 do doc 04, o mesmo processo no holdout tende a se abster, o que deixaria G2 inconclusivo pelo IS-17. O desenvolvimento não aprova nem reprova G2. Resultado negativo é resultado válido.
 
 ---
 
@@ -871,4 +885,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.25 | 07/11/2026 | §5.3 aprovado em 07/11/2026 (DEC-39). §5 e §5.3: simulador, baselines e registro das etapas 4 e 5 (DEC-38): colunas de simulação no dataset, simulador e cenários, capital minuto a minuto, sorteio de B2, registro em SQLite com registros só de acréscimo no S3, comandos e testes previstos. MD-31 e linha 0.24 com a data de Brasília (07/11). |
 | 0.26 | 07/11/2026 | §5.3: implementação das etapas 4 e 5 (colunas de simulação, B1 e B2 no comando, tentativas dos baselines, ordem das recusas, registros locais e reconstrução, testes) e MD-32 (dataset refeito em 25 s; baselines nos sete cenários em cerca de 1 s, B2 com 20.000 operações em 0,9 s, pico de ~560 MB); dataset oficial `1f96ddf76ce5e058`, refeito depois do commit, e as primeiras execuções de baselines registradas no S3. |
 | 0.27 | 08/11/2026 | §5.4 aprovado em 08/11/2026 (DEC-42). §5 e §5.4: treino, validação e relatório de desenvolvimento da etapa 6 (DEC-41): pacotes `models` e `stats`, walk-forward e relatório no pipeline, campo `outcome` e tabela `outcomes` no registro, previsões guardadas, `xgboost` e `scikit-learn` no grupo `pesquisa`, estimativa de tempo e testes previstos. |
-| 0.28 | 08/11/2026 | §5.4: implementação da etapa 6 (pontos e purga, modelos, diagnósticos, tentativas, abstenção, previsões, relatório, saída dos comandos e testes), duas pendências para antes do holdout (cenário do drawdown do IS-19 e regra do ganho incremental nas ablações) e MD-33 (walk-forward sintético do tamanho da trilha A em 7 min 22 s, pico de 1,7 GiB; relatório em 5,2 s). |
+| 0.28 | 08/11/2026 | §5.4: implementação da etapa 6 (pontos e purga, modelos, diagnósticos, tentativas, abstenção, previsões, relatório, saída dos comandos e testes), duas pendências para antes do holdout (cenário do drawdown do IS-19 e regra do ganho incremental nas ablações) e MD-33 (walk-forward sintético do tamanho da trilha A em 7 min 22 s, pico de 1,7 GiB; relatório em 5,2 s; execução oficial depois do commit `4e4233b` em 12 min 44 s, pico de 1,27 GiB, 180 tentativas; desenvolvimento quase todo em abstenção, sem estratégia que passe na prévia de G2). |
