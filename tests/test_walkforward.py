@@ -277,3 +277,33 @@ def test_report_only_takes_executions_of_its_dataset(flow: Flow) -> None:
     (flow.datasets / f"{OTHER}.manifest.json").write_text(json.dumps(manifest))
     code, _, err = report(flow, OTHER)
     assert code == 2 and f"nenhuma execução de modelo terminada com o dataset {OTHER}" in err
+
+
+def test_walkforward_takes_the_horizons_of_the_dataset(flow: Flow) -> None:
+    """Sem `--horizons`, os horizontes do manifesto; um ausente é recusado antes do registro
+    (doc 03 §5.5; RF-247)."""
+    only60 = "d" * 16
+    datasets = flow.tmp / "only60"
+    datasets.mkdir()
+    shutil.copyfile(flow.datasets / f"{DEV}.parquet", datasets / f"{only60}.parquet")
+    manifest = json.loads((flow.datasets / f"{DEV}.manifest.json").read_text())
+    manifest["dataset_id"] = only60
+    manifest["identity"]["label"] = {"horizons": [60]}
+    (datasets / f"{only60}.manifest.json").write_text(json.dumps(manifest))
+    root, registry = flow.tmp / "only60-store", flow.tmp / "only60-exp" / "registry.sqlite"
+    root.mkdir()
+    common: list[str | Path] = ["--data-dir", root, "--dataset", only60, "--rungs", "B4"]
+    common += ["--models", "logistic", "--datasets-dir", datasets, "--registry", registry]
+
+    code, _, err = run("walkforward", *common, "--horizons", "15")
+    assert code == 2 and "horizonte 15 não está no dataset" in err
+    with Registry(registry, LocalDirectoryStore(root)) as reg:
+        assert not reg.executions(), "a recusa vem antes do registro"
+
+    code, out, err = run("walkforward", *common)
+    assert code == 0, err
+    assert "B4 · H = 60 min · logistic" in out and "H = 15 min" not in out
+    with Registry(registry, LocalDirectoryStore(root)) as reg:
+        (execution,) = reg.executions()
+        spec = reg.show(str(execution["id"]))["spec"]
+        assert isinstance(spec, dict) and spec["horizons"] == [60]

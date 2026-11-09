@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.29 — rascunho |
+| Versão | 0.30 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -440,6 +440,33 @@ O tempo de ajuste depende do tamanho, não dos valores. Resultados:
   - **Prévia de G2:** nenhuma estratégia passa. IS-17 tem no máximo 30 operações. Os IC 95% da expectativa ficam abaixo de zero ou cruzam o zero. Com o XGBoost sem operações, o DSR e as ablações ficam vazios.
   - Pelo §8.3 do doc 04, o mesmo processo no holdout tende a se abster, o que daria zero operações e resultado inconclusivo pelo IS-17.
   - O IS-18, porém, é medido no desenvolvimento (doc 04 §10.1) e deu 0 de 6 dobras positivas em todas as estratégias; um mês de abstenção não conta como positivo (doc 04 §8.2). Como G2 exige todos os critérios, nenhuma estratégia da trilha A passa em G2 com este método, seja qual for o resultado no holdout. Resultado negativo é resultado válido.
+
+### 5.5 Revisão do método da trilha A (etapa 6b; DEC-43, DEC-44; SRS §4.14)
+
+A revisão troca só os horizontes da trilha A: 120 e 240 min no lugar de 15 e 60 (doc 04 §13.1). O alvo, a validade, os pontos elegíveis, o simulador, o walk-forward e o relatório já tratam cada horizonte pelo nome das colunas (`eligible_h<H>`, `target_h<H>`), e o `trader walkforward` e o `trader baselines` já recusam um horizonte que o dataset não tem. O que muda:
+
+- **`trader dataset`** ganha `--horizons` (padrão `15,60`, PD-15), que vai para os parâmetros do alvo (`LabelParams.horizons`). Os horizontes entram no id do dataset (RF-227), então o dataset novo não substitui o de 15 e 60 min. Com H = 240, a validade do alvo olha 241 minutos de negócios depois da decisão.
+- **`trader walkforward`**: sem `--horizons`, usa os horizontes do manifesto (`identity.label.horizons`) em vez de `15,60` fixos. A recusa de um horizonte ausente continua antes do registro.
+- **`trader baselines`**: só o texto de ajuda, que hoje cita 15 ou 60.
+- **`trader report`**: sem mudança.
+- **Testes previstos:**
+  - um dataset sintético com `--horizons 120,240` tem as colunas dos dois horizontes, e não as de 15 e 60;
+  - a validade do alvo com H = 240 cai quando falta um minuto de negócios até t + 1 + 240;
+  - o walk-forward sem `--horizons` roda os horizontes do manifesto;
+  - um horizonte ausente é recusado sem registrar a execução.
+- **Disco e tempo:** o dataset novo tem as mesmas 79 colunas, ~125 MB, e as previsões das 12 execuções, ~120 MB. Hoje o espaço livre fica perto de 1,6 GiB. Apagar os datasets antigos `b7a76cda934eb1ee` e `847e7cf5f2be0e5c` (~250 MB) liberaria espaço, mas só com a aprovação do usuário. O walk-forward deve levar o mesmo que o oficial da etapa 6 (~13 min), com um pouco menos de pontos.
+- **Sequência oficial, depois do commit:**
+  1. `trader dataset --track A --start 2025-10-23 --end 2026-07-22 --horizons 120,240`, que envia o dataset ao S3 e precisa do `aws login`;
+  2. `trader walkforward --dataset <id>`, com 12 execuções; a contagem do IS-15 passa a 360;
+  3. `trader report --dataset <id>`;
+  4. a regra de PD-43 (doc 04 §13.1): com pelo menos uma estratégia do XGBoost positiva em 4 das 6 dobras, segue a etapa 7; senão, a trilha A fecha com resultado negativo. Os resultados entram como MD-34.
+- **Implementação (08/11/2026):** como previsto, com um acréscimo: `LabelParams` recusa horizontes vazios, não positivos, repetidos ou fora de ordem, porque a ordem entra no id; o `trader dataset` sai com código 2 e a mensagem. Quatro testes novos:
+  - a validade com H = 240;
+  - a recusa de horizontes inválidos;
+  - o comando com `--horizons 120,240`: colunas, manifesto e um id diferente do padrão;
+  - o walk-forward sem `--horizons`, que usa os horizontes do manifesto e recusa um ausente antes do registro.
+
+  pytest, ruff e mypy passam.
 
 ---
 
@@ -888,3 +915,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.27 | 08/11/2026 | §5.4 aprovado em 08/11/2026 (DEC-42). §5 e §5.4: treino, validação e relatório de desenvolvimento da etapa 6 (DEC-41): pacotes `models` e `stats`, walk-forward e relatório no pipeline, campo `outcome` e tabela `outcomes` no registro, previsões guardadas, `xgboost` e `scikit-learn` no grupo `pesquisa`, estimativa de tempo e testes previstos. |
 | 0.28 | 08/11/2026 | §5.4: implementação da etapa 6 (pontos e purga, modelos, diagnósticos, tentativas, abstenção, previsões, relatório, saída dos comandos e testes), duas pendências para antes do holdout (cenário do drawdown do IS-19 e regra do ganho incremental nas ablações) e MD-33 (walk-forward sintético do tamanho da trilha A em 7 min 22 s, pico de 1,7 GiB; relatório em 5,2 s; execução oficial depois do commit `4e4233b` em 12 min 44 s, pico de 1,27 GiB, 180 tentativas; desenvolvimento quase todo em abstenção, sem estratégia que passe na prévia de G2). |
 | 0.29 | 08/11/2026 | MD-33: correção da conclusão. O IS-18, medido no desenvolvimento, deu 0 de 6 dobras positivas em todas as estratégias, então nenhuma passa em G2 com este método, seja qual for o holdout; a versão 0.28 dizia que o desenvolvimento não aprovava nem reprovava G2. |
+| 0.30 | 08/11/2026 | §5.5 aprovado em 08/11/2026 (DEC-44). §5.5: revisão do método da trilha A (etapa 6b, DEC-43): `--horizons` no `trader dataset`, horizontes do walk-forward vindos do manifesto, testes previstos, disco, tempo e sequência oficial; implementação, com a recusa de horizontes inválidos. |

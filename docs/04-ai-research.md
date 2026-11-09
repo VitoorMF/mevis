@@ -4,9 +4,9 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 04 — AI & Quantitative Research |
-| Versão | 1.7 — aprovado |
+| Versão | 1.8 — aprovado |
 | Escopo desta versão | Método de pesquisa da V0.2: dados e períodos, formulação do problema, features, baselines, modelos, validação, custos, métricas, critérios de G2 a pré-registrar, registro de experimentos e plano de trabalho. |
-| Status | Aprovado em 26/10/2026 (DEC-28); v1.4 aprovada em 07/11/2026 (DEC-35); v1.5 aprovada em 07/11/2026 (DEC-37), com a etapa 3 (DEC-36); v1.6 aprovada em 07/11/2026 (DEC-39), com as etapas 4 e 5 (DEC-38); v1.7 aprovada em 08/11/2026 (DEC-42), com a etapa 6 (DEC-41). Decisões PD-15 a PD-23 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
+| Status | Aprovado em 26/10/2026 (DEC-28); v1.4 aprovada em 07/11/2026 (DEC-35); v1.5 aprovada em 07/11/2026 (DEC-37), com a etapa 3 (DEC-36); v1.6 aprovada em 07/11/2026 (DEC-39), com as etapas 4 e 5 (DEC-38); v1.7 aprovada em 08/11/2026 (DEC-42), com a etapa 6 (DEC-41); v1.8 aprovada em 08/11/2026 (DEC-44), com a revisão do método da trilha A (DEC-43, §13.1). Decisões PD-15 a PD-23 e PD-43 a PD-45 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
 | Data | 26/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.8; [02 — SRS](02-srs.md) v0.5; [03 — Architecture](03-architecture.md) v0.8; [06 — Data & Integrations](06-data-integrations.md) v0.8 |
 
@@ -27,11 +27,13 @@ As etiquetas seguem o PRD §0.1. Este documento não presume que exista vantagem
 
 **O que já foi observado dos dados (para o registro honesto do pré-registro):** durante o backfill e a coleta, só foram vistos contagens de linhas por dia, estatísticas de qualidade (quarentena, ids e minutos ausentes) e métricas de operação (latência, offset). Nenhuma análise de retornos, padrões ou features foi feita até a data deste documento.
 
+**Observado antes da revisão da trilha A (08/11/2026, §13.1):** os resultados do desenvolvimento com 15 e 60 min (doc 03, MD-33) e um diagnóstico descritivo, só com o período de desenvolvimento e as previsões já registradas: a fração de retornos líquidos positivos e o tamanho típico do movimento por horizonte, de 15 a 480 min; o acerto de direção necessário para empatar com os custos; e quanto as previsões separam o tamanho do movimento da direção. Nenhum modelo foi treinado fora do registro, e o holdout continua sem consulta.
+
 ---
 
 ## 1. Decisões deste documento
 
-Decididas pelo responsável pelo produto em 26/10/2026, depois de apresentadas as opções e os trade-offs. Cada item é detalhado na seção indicada.
+Decididas pelo responsável pelo produto em 26/10/2026 (PD-15 a PD-23) e em 08/11/2026 (PD-43 a PD-45, revisão da trilha A), depois de apresentadas as opções e os trade-offs. Cada item é detalhado na seção indicada.
 
 | ID | Questão | Opções apresentadas | Decisão | Seção |
 |---|---|---|---|---|
@@ -44,6 +46,9 @@ Decididas pelo responsável pelo produto em 26/10/2026, depois de apresentadas a
 | PD-21 | Valores dos critérios de G2 | Propostos em §10.2 | **Aprovados como propostos** e pré-registrados | §10 |
 | PD-22 | Uso dos candles de 2023 a 2025 | (a) estudo de robustez de H-01 e H-02; (b) dentro do walk-forward oficial | **(a) estudo de robustez** | §3.2 |
 | PD-23 | Onde transformar negócios em agregados por minuto | (a) MacBook, lendo do S3 dia a dia; (b) host de produção; (c) EC2 dedicada e temporária | **(c) EC2 dedicada**, com o MacBook como plano B (estimativa de custo aprovada: ~US$ 0,60 por execução) | §12 |
+| PD-43 | Rodadas de revisão do método na trilha A, depois do desenvolvimento com 15 e 60 min | (a) uma rodada só, pré-registrada; (b) até duas | **(a) uma rodada só**: se nenhuma estratégia do XGBoost tiver resultado positivo em 4 das 6 dobras, a trilha A fecha com resultado negativo e o holdout fica lacrado | §13.1 |
+| PD-44 | Horizontes da revisão | (a) 120 e 240 min; (b) só 240 min; (c) manter 15 e 60 min | **(a) 120 e 240 min**, no lugar de 15 e 60, na trilha A | §4.2, §13.1 |
+| PD-45 | Alvo e saída da revisão | (a) manter o alvo binário líquido com saída por tempo; (b) barreiras triplas; (c) regressão do retorno | **(a) manter**, para mudar uma coisa só | §4.3, §13.1 |
 
 ---
 
@@ -135,6 +140,8 @@ A decisão é tomada uma vez por minuto, em t_d = fechamento do minuto + 2 s (te
 
 Motivo: com custo de ~0,22% por operação completa (§9), o preço precisa andar mais que isso para haver lucro. **[HIPÓTESE]** Em poucos minutos, os movimentos típicos do BTC são da mesma ordem dos custos; 15 e 60 minutos dão mais espaço sem sair do intraday (DEC-15). A varredura de muitos horizontes (opção c) aumentaria o número de testes e a chance de achar sorte (R-02).
 
+**Revisão da trilha A [DECISÃO] DEC-43 (PD-44, 08/11/2026).** Depois do desenvolvimento com 15 e 60 min (doc 03, MD-33), a rodada única de revisão (§13.1) usa **H = 120 min** e **H = 240 min**. Os resultados de 15 e 60 min continuam no registro e contam no IS-15. A trilha B escolhe os horizontes na etapa 8 (§15).
+
 ### 4.3 Alvo
 
 **[DECISÃO] PD-16:** alvo binário y = 1 se o retorno da operação simulada (entrada em t_d, saída em t_d + H, pelas regras de §9) for positivo **depois dos custos**; y = 0 caso contrário.
@@ -142,6 +149,7 @@ Motivo: com custo de ~0,22% por operação completa (§9), o preço precisa anda
 - O modelo estima p = P(y = 1). A decisão entra comprada se p > τ, com τ escolhido na validação interna (§8.2).
 - Usar o retorno líquido no alvo alinha o que o modelo aprende com o que interessa (lucro depois de custos), em vez de prever direção pura.
 - Barreiras triplas (alvo de lucro, stop e tempo) ficam como extensão depois do primeiro ciclo, porque acrescentam parâmetros e testes.
+- Alvo e saída por tempo mantidos na revisão da trilha A (PD-45, §13.1).
 
 **Cálculo exato [DECISÃO] DEC-36.** A entrada é no preço de execução base (§9) do minuto t + 1, e a saída no do minuto t + 1 + H. Com taxa f e deslizamento s por lado, cobrados contra a operação, o retorno líquido é
 
@@ -298,7 +306,7 @@ Grade pequena é deliberada: cada combinação conta como tentativa na correçã
 - **Regressão logística:** features padronizadas pela média e pelo desvio do trecho em que o modelo é ajustado; penalidade L2 com o C da grade; implementação do scikit-learn.
 - **XGBoost:** objetivo logístico binário, árvores por histograma, os valores da grade, semente 0 e número fixo de threads, para que as mesmas entradas deem as mesmas previsões.
 - **Semente:** uma só (0) em todas as configurações; outra semente seria outra tentativa (§11).
-- **Papel da logística:** referência linear, nunca candidata a G2. As configurações dela contam como tentativas (DEC-38). Na trilha A, são 3 degraus × 2 horizontes × (2 × 5 da logística + 4 × 5 do XGBoost) = 180 tentativas.
+- **Papel da logística:** referência linear, nunca candidata a G2. As configurações dela contam como tentativas (DEC-38). Na trilha A, são 3 degraus × 2 horizontes × (2 × 5 da logística + 4 × 5 do XGBoost) = 180 tentativas por par de horizontes; com a revisão de §13.1 (120 e 240 min), o total da trilha passa a 360.
 
 ---
 
@@ -345,6 +353,8 @@ Motivo: um mês de operações simuladas (~30 retornos diários) é pouco para c
 ### 8.3 Holdout
 
 Depois do desenvolvimento, para cada degrau e horizonte, o modelo final é treinado com todo o período de desenvolvimento, com os hiperparâmetros e τ escolhidos pelo mesmo processo, e avaliado uma vez no holdout (§3.3). Pelo mesmo processo, ele se abstém no holdout se a validação em m9 não mostrar vantagem (DEC-41); o holdout fica então sem operações e inconclusivo pelo IS-17.
+
+Na trilha A, o holdout avalia o método revisado (§13.1), e só se a revisão atender ao IS-18 no desenvolvimento.
 
 ---
 
@@ -480,12 +490,44 @@ Os critérios estão congelados desde 26/10/2026 (commit que registra esta vers�
 | 4 | Simulador de operações com custos e baselines B0 a B3 (F-14, F-17) | 3 |
 | 5 | Registro de experimentos (F-19) | 3 |
 | 6 | Trilha A: walk-forward de B4 a B6, ablações, estatísticas dos critérios de G2 (IS-14, IS-15), relatório de desenvolvimento | 4, 5 |
-| 7 | Trilha A: avaliação única do holdout | 6 e critérios congelados |
+| 6b | Trilha A: revisão do método em uma rodada (§13.1): dataset com H = 120 e 240 min, walk-forward e relatório de desenvolvimento | 6 |
+| 7 | Trilha A: avaliação única do holdout | 6b com o IS-18 atendido, e critérios congelados |
 | 8 | Trilha B: desenvolvimento com B0 a B7 | G1 e ≥ 8 semanas de livro (por volta de 20/12/2026) |
 | 9 | Trilha B: congelamento, coleta do holdout (6 semanas) e avaliação única | 8 |
-| 10 | Relatório de conclusão da V0.2: status de H-01 a H-04 (CA-12) | 7, 9 |
+| 10 | Relatório de conclusão da V0.2: status de H-01 a H-04 (CA-12) | 7 (ou o encerramento da trilha A, §13.1), 9 |
 
 Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 2027, antes do CP-2 (15/03/2027, doc 03 §10.4).
+
+### 13.1 Revisão do método da trilha A [DECISÃO] DEC-43
+
+**Motivo.** No desenvolvimento com 15 e 60 min (doc 03, MD-33), os modelos quase sempre se abstiveram, e nenhuma estratégia teve dobra positiva: o IS-18 já impede G2 com aquele método. Um diagnóstico descritivo de 08/11/2026 (§0), só com o desenvolvimento, explica o porquê. [FATO] Os números:
+
+| H (min) | Retorno líquido > 0 | Movimento mediano (pb) | Movimento mediano ÷ custo | Acerto de direção para empatar | O mesmo nos 10% de minutos mais voláteis | Máximo de operações em 92 dias |
+|---|---|---|---|---|---|---|
+| 15 | 11,4% | 10,5 | 0,48 | inatingível (> 100%) | 82% | 8.280 |
+| 60 | 23,7% | 21,0 | 0,95 | 84% | 67% | 2.171 |
+| 120 | 29,5% | 29,6 | 1,35 | 74% | 63% | 1.094 |
+| 240 | 34,5% | 42,4 | 1,93 | 67% | 60% | 549 |
+
+- Movimento é o valor absoluto do retorno do preço em H minutos; o custo base de ida e volta é ~22 pb (§9). O acerto para empatar é aproximado por 0,5 + custo ÷ (2 × média do movimento), supondo movimentos do mesmo tamanho para cima e para baixo; a volatilidade é a `rvol_60`. Para 120 e 240 min, os pontos são os elegíveis de H = 60, sem a validade completa do alvo (§4.3); por isso essas linhas são aproximadas.
+- Nas previsões de teste do XGBoost (dobras juntas), o p separa bem o movimento grande (valor absoluto do retorno acima do custo): AUC de 0,67 (H = 60) a 0,75 (H = 15). A direção quase não: AUC de 0,52 entre os movimentos grandes e de 0,50 em todos. No 1% de maior p com H = 60, o preço subiu em 57% dos casos, e o retorno líquido médio foi de −16,5 pb.
+- [HIPÓTESE] Os modelos aprenderam quando o preço vai se mexer, não para onde. Horizontes mais longos baixam o acerto de direção necessário, mas não criam informação de direção: a revisão pode terminar negativa, e isso é um resultado válido.
+
+**Regras (PD-43 a PD-45):**
+
+1. Uma rodada só, decidida antes de treinar. Muda apenas o horizonte: H = 120 e 240 min no lugar de 15 e 60. Ficam como estão o alvo binário líquido e a saída por tempo (§4.3, §4.4), as features e os degraus (§5), os modelos e a grade (§7), a seleção e a abstenção (§8.2), os custos (§9), as métricas e os critérios de G2 (§10).
+2. A revisão usa um dataset novo do desenvolvimento da trilha A, no mesmo período (23/10/2025 a 22/07/2026), com os parâmetros do alvo para 120 e 240 min. O walk-forward, as dobras e o relatório são os da etapa 6.
+3. **Depois do desenvolvimento:** se pelo menos uma estratégia do XGBoost tiver resultado positivo em pelo menos 4 das 6 dobras (IS-18), segue a etapa 7, com os três degraus e os dois horizontes revisados (as ablações precisam de todos). Senão, a trilha A fecha com resultado negativo, sem outra rodada, e o holdout fica lacrado.
+4. As 180 tentativas novas somam às 180 de 15 e 60 min: N = 360 no DSR do IS-15.
+
+**Consequências conhecidas:**
+
+- O PRD passa a admitir horizontes de 5 a 240 min (DEC-15), ainda intraday.
+- **IS-17:** com H = 240, cabem no máximo 549 operações sem sobreposição no holdout de 92 dias; um modelo seletivo pode ficar abaixo de 200, e o holdout, inconclusivo. Com H = 120, cabem 1.094.
+- **Validação interna:** um mês comporta no máximo ~180 operações com H = 240 (~360 com H = 120), acima das 20 exigidas para escolher τ (§8.2).
+- **Validade do alvo:** com H = 240, o alvo exige 241 minutos de negócios válidos depois da decisão (§4.3), então haverá menos pontos elegíveis do que com 60 min.
+- **Trilha B:** o holdout de 6 semanas comporta só ~250 operações com H = 240 (~500 com H = 120); os horizontes dela se decidem na etapa 8 (§15).
+- **Viés do pesquisador:** o desenvolvimento já foi visto (§0), então o resultado do método revisado no desenvolvimento tende a ser otimista. Só o holdout dá a medida limpa.
 
 ---
 
@@ -516,6 +558,8 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | Comparar os degraus de uma trilha nos mesmos pontos | **Resolvido em 07/11/2026 (DEC-36):** todos usam os pontos válidos no degrau mais alto da trilha e com alvo válido (§4.4) |
 | Regra do preço de execução no estudo de robustez de 2023 a 2025, que só tem candles (§3.2) | Quando o estudo for planejado, depois dos resultados da trilha A (DEC-36) |
 | Como o DSR (IS-15) estima a variância dos Sharpe entre as tentativas, já que hiperparâmetros e τ são escolhidos na validação interna (§8.2) | **Resolvido em 08/11/2026 (DEC-41):** pelo Sharpe de cada tentativa nos meses de validação interna (§10.1) |
+| Cenário do drawdown do IS-19 (base ou estresse) e regra do ganho incremental nas ablações (as duas diferenças ou basta uma), §10.2 (doc 03 §5.4) | Antes da etapa 7 |
+| Horizontes da trilha B, já que H = 240 min comporta só ~250 operações no holdout de 6 semanas (IS-17; §13.1) | Etapa 8 |
 
 ---
 
@@ -550,3 +594,4 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | 1.5 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-37), com os requisitos da etapa 3. DEC-36: §4.3, cálculo exato do retorno líquido e validade do alvo; §4.4, pontos elegíveis iguais para todos os degraus da trilha; §9, taxa verificada e preço de execução por minuto a partir dos negócios; §11, uma tabela por trilha e período e registro de acesso ao holdout; §3.2 e §15, regra de preço do estudo de robustez adiada; §13, etapa 3 atualizada. |
 | 1.6 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-39), com os requisitos das etapas 4 e 5. DEC-38: §9, cenários de custo, com o de estresse juntando taxa, deslizamento e latência; §10.1, capital marcado minuto a minuto; §10.2, esclarecimentos do IS-15 (configurações distintas) e do IS-19 (cenário de estresse e drawdown), antes de qualquer avaliação do holdout; §11, colunas de simulação no dataset e contagem de tentativas. Também: §4.4, momento do próximo sinal; §6, detalhes dos baselines; §10.1, janela e definições das métricas; §11, detalhes do registro; §13 e §15, estatísticas de G2 e variância do DSR na etapa 6. |
 | 1.7 | 08/11/2026 | Aprovado em 08/11/2026 (DEC-42), com os requisitos da etapa 6. DEC-41: §7, grade de τ mantida; §8.2, hiperparâmetros pelo log loss, τ pelo Sharpe com pelo menos 20 operações e abstenção sem vantagem; §10.1, variância do DSR pelos meses de validação. Também: §7, features por degrau, linhas de treino, implementação dos modelos e 180 tentativas na trilha A; §8.1, meses e dobras da trilha A e purga; §8.3, abstenção no holdout; §10.1, bootstrap, DSR, ablações e relatório de desenvolvimento; §11, execução de modelo; §15, pendência do DSR resolvida. |
+| 1.8 | 08/11/2026 | Aprovado em 08/11/2026 (DEC-44), com os requisitos da etapa 6b. DEC-43 (PD-43 a PD-45): revisão do método da trilha A em uma rodada, com H = 120 e 240 min e o mesmo alvo (§1, §4.2, §4.3, §13.1). Também: §0, o que foi observado antes da revisão; §7, 360 tentativas na trilha A; §8.3 e §13, etapa 6b e condição da etapa 7; §15, as duas pendências de G2 e os horizontes da trilha B. |

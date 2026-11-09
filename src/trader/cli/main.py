@@ -153,6 +153,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     dataset.add_argument("--start", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
     dataset.add_argument("--end", required=True, type=date.fromisoformat, help="AAAA-MM-DD")
     dataset.add_argument(
+        "--horizons",
+        type=_ints,
+        default=(15, 60),
+        help="horizontes do alvo em minutos, crescentes (doc 04 §4.2; padrão 15,60)",
+    )
+    dataset.add_argument(
         "--out-dir", type=Path, default=Path("data/datasets"), help="pasta local do Parquet"
     )
     dataset.add_argument(
@@ -168,7 +174,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     baselines.add_argument("--data-dir", type=Path, help="diretório de dados (sem S3)")
     baselines.add_argument("--replica-dir", type=Path, help="réplica local (desenvolvimento)")
     baselines.add_argument("--dataset", required=True, help="id do dataset (RF-227)")
-    baselines.add_argument("--horizon", required=True, type=int, help="H em minutos (15 ou 60)")
+    baselines.add_argument(
+        "--horizon", required=True, type=int, help="H em minutos, um dos horizontes do dataset"
+    )
     baselines.add_argument("--start", type=date.fromisoformat, help="1º dia da janela")
     baselines.add_argument("--end", type=date.fromisoformat, help="último dia da janela")
     baselines.add_argument("--b2-trades", type=int, help="número de operações sorteadas no B2")
@@ -201,7 +209,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     walkforward.add_argument("--replica-dir", type=Path, help="réplica local (desenvolvimento)")
     walkforward.add_argument("--dataset", required=True, help="id do dataset (RF-227)")
     walkforward.add_argument("--rungs", type=_names, default=("B4", "B5", "B6"), help="B4,B5,B6")
-    walkforward.add_argument("--horizons", type=_ints, default=(15, 60), help="15,60")
+    walkforward.add_argument(
+        "--horizons", type=_ints, help="ex.: 120,240 (padrão: os horizontes do dataset)"
+    )
     walkforward.add_argument(
         "--models", type=_names, default=("logistic", "xgboost"), help="logistic,xgboost"
     )
@@ -690,10 +700,15 @@ def run_dataset(config: PipelineConfig, args: argparse.Namespace) -> int:
     else:
         root = config.replica_dir or config.data_dir
         source, store = LocalSource(root), LocalDirectoryStore(root)
+    try:
+        params = LabelParams(horizons=args.horizons)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     code = code_version()
     if code.endswith(".dirty"):
         print(f"aviso: código com mudanças sem commit ({code})", file=sys.stderr)
-    request = DatasetRequest(args.track, args.start, args.end, args.allow_holdout, LabelParams())
+    request = DatasetRequest(args.track, args.start, args.end, args.allow_holdout, params)
     try:
         built = build_dataset(
             source,

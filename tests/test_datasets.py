@@ -120,6 +120,27 @@ def test_target_only_reads_the_entry_and_exit_minutes() -> None:
         assert same == (k not in (t + 1, t + 1 + h)), k
 
 
+def test_long_horizons_need_every_trade_minute_until_the_exit() -> None:
+    """Revisão da trilha A (doc 04 §13.1): com H = 240, a validade olha 241 minutos."""
+    n, bad = 600, 300
+    valid = np.ones(n, bool)
+    valid[bad] = False
+    labels = compute_labels(np.full(n, 100.0), valid, LabelParams(horizons=(120, 240)))
+    for h in (120, 240):
+        last = n - 2 - h  # último t com a saída dentro do período
+        hit = set(range(bad - 1 - h, bad))  # t + 1 <= bad <= t + 1 + H
+        expected = {t for t in range(last + 1) if t not in hit}
+        assert set(np.flatnonzero(labels.valid[h])) == expected, h
+    assert labels.valid[240][bad - 242] and not labels.valid[240][bad - 241]
+
+
+def test_horizons_must_be_positive_increasing_and_distinct() -> None:
+    for horizons in ((), (0,), (-5, 15), (240, 120), (120, 120)):
+        with pytest.raises(ValueError, match="horizontes inválidos"):
+            LabelParams(horizons=horizons)
+    assert LabelParams(horizons=(120, 240)).to_dict()["horizons"] == [120, 240]
+
+
 def test_price_column_follows_the_latency() -> None:
     assert LabelParams().price_column == "exec_price_2500ms"
     assert LabelParams(latency_ms=2000).price_column == "exec_price_4000ms"
@@ -384,3 +405,29 @@ def test_dataset_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> 
     assert main([*args, "--start", "2026-10-22", "--end", "2026-10-23"]) == 2
     assert "recusado" in capsys.readouterr().err
     assert len(list(out.glob("*.parquet"))) == 1
+
+
+def test_dataset_command_with_other_horizons(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--horizons` vai para os parâmetros do alvo e para o id (doc 03 §5.5; RF-229)."""
+    root = build_data(tmp_path / "data")
+    out = tmp_path / "datasets"
+    args = ["dataset", "--data-dir", str(root), "--track", "A", "--out-dir", str(out)]
+    period = ["--start", "2026-10-23", "--end", "2026-10-24"]
+    assert main([*args, *period, "--horizons", "120,240"]) == 0
+    printed = capsys.readouterr().out
+    assert "H = 120 min" in printed and "H = 240 min" in printed and "H = 15 min" not in printed
+    (path,) = out.glob("*.parquet")
+    names = pq.read_schema(path).names
+    assert {"eligible_h120", "target_h240", "net_return_h240"} <= set(names)
+    assert not any(n.endswith(("_h15", "_h60")) for n in names)
+    manifest = json.loads((out / f"{path.stem}.manifest.json").read_text())
+    assert manifest["identity"]["label"]["horizons"] == [120, 240]
+
+    assert main([*args, *period]) == 0, "os horizontes padrão dão outro dataset"
+    capsys.readouterr()
+    assert len(list(out.glob("*.parquet"))) == 2
+
+    assert main([*args, *period, "--horizons", "240,120"]) == 2
+    assert "horizontes inválidos" in capsys.readouterr().err

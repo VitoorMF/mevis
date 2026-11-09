@@ -4,8 +4,8 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 01 — PRD |
-| Versão | 0.20 — rascunho |
-| Status | Decisões até DEC-42; aguardando confirmação da conta AWS e revisão final (§19) |
+| Versão | 0.21 — rascunho |
+| Status | Decisões até DEC-44; aguardando confirmação da conta AWS e revisão final (§19) |
 | Data | 23/10/2026 |
 | Responsável pelo produto | *a preencher* |
 | Fonte | [00 — Contexto inicial](00-contexto-inicial.md) |
@@ -550,7 +550,7 @@ O MVP é aceito quando **todos** os critérios abaixo forem atendidos, **indepen
 | DEC-12 | Risco | Controle independente da IA. |
 | DEC-13 | Processo | Documentação antes da implementação, começando pelo PRD. |
 | DEC-14 | Direção no MVP | Long/flat no spot: a execução só abre posição comprada ou fica fora; SELL encerra ou reduz a posição. O modelo pode estimar as duas direções para pesquisa e para decidir saídas. |
-| DEC-15 | Horizonte | Intraday em minutos, com candle base de 1 minuto; horizontes candidatos (ordem de 5 a 60 minutos) comparados no doc 04. Scalping de segundos e swing ficam fora do MVP. |
+| DEC-15 | Horizonte | Intraday em minutos, com candle base de 1 minuto; horizontes candidatos (ordem de 5 a 60 minutos; até 240 minutos desde DEC-43) comparados no doc 04. Scalping de segundos e swing ficam fora do MVP. |
 | DEC-16 | Orçamento | Usar primeiro os US$ 180 em créditos AWS e o Free Tier, sem despesas adicionais; depois dos créditos, teto de **R$ 100/mês** (revisto em 23/10/2026; era R$ 50). Validade, elegibilidade dos serviços e consumo estimado dos créditos são verificados antes de definir a arquitetura. |
 | DEC-17 | Hospedagem | MVP hospedado na AWS, preferencialmente com VPC, EC2, S3 e CloudWatch, operando 24/7. |
 | DEC-18 | Livro de ofertas | Parcial top 20 a cada 100 ms (normalizado) + stream diferencial a cada 100 ms só na camada bruta, com snapshots REST completos periódicos. Reconstrução do livro completo continua Could (F-04). |
@@ -578,6 +578,8 @@ O MVP é aceito quando **todos** os critérios abaixo forem atendidos, **indepen
 | DEC-40 | Interpretações dos agregados por minuto confirmadas | As quatro interpretações registradas na implementação de doc 06 §5.6 ficam como estão (08/11/2026): num salto de id em dia de arquivo, os minutos dos dois negócios das pontas também ficam `missing`; `last_recv_ts_us` ignora os negócios recuperados do arquivo, sem horário de recebimento; `snapshot_count` conta também os snapshots com livro cruzado, que ficam fora das medidas; `minute_trades` e `minute_book` têm a coluna `symbol`. |
 | DEC-41 | Treino e validação (etapa 6 da V0.2) | Decisões PD-39 a PD-42 (08/11/2026): na validação interna de cada dobra, os hiperparâmetros são escolhidos pelo log loss e o limiar τ pelo Sharpe da operação simulada, entre os τ com pelo menos 20 operações; se nenhum τ der Sharpe positivo, a estratégia não opera no mês de teste (nem no holdout, com o modelo final); a variância dos Sharpe entre as tentativas, usada no DSR do IS-15, vem dos meses de validação interna; a grade de τ (0,50 a 0,70) fica como está (doc 04 §7, §8.2 e §10.1). |
 | DEC-42 | Etapa 6 da V0.2 aprovada | Requisitos do treino, da validação, das estatísticas e do relatório de desenvolvimento (SRS v0.13: RF-235 a RF-247, RF-277 a RF-282, RNF-032), método (doc 04 v1.7) e arquitetura (doc 03 §5.4), aprovados em 08/11/2026. |
+| DEC-43 | Revisão do método da trilha A | Decisões PD-43 a PD-45 (08/11/2026), depois do desenvolvimento com 15 e 60 min sem nenhuma dobra positiva (doc 03, MD-33): uma única rodada de revisão no desenvolvimento, que troca só os horizontes da trilha A por 120 e 240 min, com o mesmo alvo binário líquido e saída por tempo; se nenhuma estratégia do XGBoost tiver resultado positivo em 4 das 6 dobras (IS-18), a trilha A fecha com resultado negativo e o holdout fica lacrado. Os critérios de G2 não mudam; as tentativas somam no IS-15 (doc 04 §1, §4.2 e §13.1). |
+| DEC-44 | Etapa 6b da V0.2 aprovada | Revisão do método da trilha A: método (doc 04 v1.8, §13.1), requisitos (SRS v0.14: RF-223, RF-229, RF-247, RF-257) e arquitetura (doc 03 §5.5), aprovados em 08/11/2026. |
 
 Permanecem **em aberto**: as pendências de §17.2.
 
@@ -614,6 +616,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | PD-31 a PD-34 | 07/11/2026 | DEC-36 — datasets e alvo (doc 04 §4, §9, §11; SRS §4.12; doc 03 §5.2; doc 06 §5.6). |
 | PD-35 a PD-38 | 07/11/2026 | DEC-38 — simulador, baselines e registro de experimentos (doc 04 §6, §9, §10, §11; SRS §4.13; doc 03 §5.3). |
 | PD-39 a PD-42 | 08/11/2026 | DEC-41 — treino e validação (doc 04 §7, §8, §10, §15; SRS §4.14; doc 03 §5.4). |
+| PD-43 a PD-45 | 08/11/2026 | DEC-43 — revisão do método da trilha A (doc 04 §1, §4.2, §13.1). |
 
 ---
 
@@ -667,6 +670,7 @@ Permanecem **em aberto**: as pendências de §17.2.
 | 0.18 | 07/11/2026 | PD-35 a PD-38 apresentadas e decididas no mesmo dia (DEC-38): simulador, baselines e registro de experimentos das etapas 4 e 5 da V0.2. DEC-39: etapas 4 e 5 aprovadas. |
 | 0.19 | 08/11/2026 | DEC-40: interpretações dos agregados por minuto (doc 06 §5.6) confirmadas sem mudança. |
 | 0.20 | 08/11/2026 | PD-39 a PD-42 apresentadas e decididas no mesmo dia (DEC-41): seleção na validação interna, abstenção sem vantagem, variância do DSR e grade de τ da etapa 6 da V0.2. DEC-42: etapa 6 aprovada. |
+| 0.21 | 08/11/2026 | PD-43 a PD-45 apresentadas e decididas no mesmo dia (DEC-43): revisão do método da trilha A em uma rodada, com horizontes de 120 e 240 min e o mesmo alvo. DEC-15 passa a admitir horizontes de até 240 minutos, ainda intraday. DEC-44: etapa 6b aprovada. |
 
 ---
 

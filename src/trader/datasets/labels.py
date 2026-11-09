@@ -48,6 +48,14 @@ class LabelParams:
     latency_ms: int = LATENCY_MS
     stress_latency_ms: int = STRESS_LATENCY_MS
 
+    def __post_init__(self) -> None:
+        """Horizontes positivos, sem repetição e em ordem crescente: a ordem entra no id do
+        dataset (RF-227), então 120,240 e 240,120 não podem virar datasets diferentes."""
+        h = self.horizons
+        if not h or any(x <= 0 for x in h) or list(h) != sorted(set(h)):
+            message = "positivos, crescentes, sem repetir"
+            raise ValueError(f"horizontes inválidos: {list(h)} ({message})")
+
     @property
     def price_column(self) -> str:
         """Coluna de `minute_trades` com o preço de execução da latência base (doc 06 §5.6)."""

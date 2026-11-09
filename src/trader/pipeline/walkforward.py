@@ -35,7 +35,8 @@ MARKET_COLUMNS = ("minute_ts_us", "entry_price", "entry_price_stress", "close", 
 class WalkForwardRequest:
     dataset_id: str
     rungs: tuple[str, ...] = tuple(RUNGS)
-    horizons: tuple[int, ...] = (15, 60)
+    horizons: tuple[int, ...] | None = None
+    """Sem horizontes, os do dataset (manifesto; doc 03 §5.5)."""
     models: tuple[str, ...] = MODELS
     seed: int = SEED
 
@@ -70,7 +71,8 @@ def run_walkforward(
     for rung in request.rungs:
         if rung not in RUNGS:
             raise ValueError(f"degrau desconhecido: {rung}")
-    for h in request.horizons:
+    horizons = request.horizons or tuple(int(h) for h in identity["label"]["horizons"])
+    for h in horizons:
         if h not in identity["label"]["horizons"]:
             raise ValueError(f"horizonte {h} não está no dataset")
     for model in request.models:
@@ -80,7 +82,7 @@ def run_walkforward(
     tests = [f"{a.isoformat()}..{b.isoformat()}" for a, b in periods[INITIAL_MONTHS:]]
 
     out: list[TaskResult] = []
-    for rung, h, model in product(request.rungs, request.horizons, request.models):
+    for rung, h, model in product(request.rungs, horizons, request.models):
         task = Task(rung, h, model, request.seed)
         spec = {
             "rungs": [rung],
