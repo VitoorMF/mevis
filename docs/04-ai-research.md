@@ -4,9 +4,9 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 04 — AI & Quantitative Research |
-| Versão | 1.8 — aprovado |
+| Versão | 1.9 — aprovado |
 | Escopo desta versão | Método de pesquisa da V0.2: dados e períodos, formulação do problema, features, baselines, modelos, validação, custos, métricas, critérios de G2 a pré-registrar, registro de experimentos e plano de trabalho. |
-| Status | Aprovado em 26/10/2026 (DEC-28); v1.4 aprovada em 07/11/2026 (DEC-35); v1.5 aprovada em 07/11/2026 (DEC-37), com a etapa 3 (DEC-36); v1.6 aprovada em 07/11/2026 (DEC-39), com as etapas 4 e 5 (DEC-38); v1.7 aprovada em 08/11/2026 (DEC-42), com a etapa 6 (DEC-41); v1.8 aprovada em 08/11/2026 (DEC-44), com a revisão do método da trilha A (DEC-43, §13.1). Decisões PD-15 a PD-23 e PD-43 a PD-45 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
+| Status | Aprovado em 26/10/2026 (DEC-28); v1.4 aprovada em 07/11/2026 (DEC-35); v1.5 aprovada em 07/11/2026 (DEC-37), com a etapa 3 (DEC-36); v1.6 aprovada em 07/11/2026 (DEC-39), com as etapas 4 e 5 (DEC-38); v1.7 aprovada em 08/11/2026 (DEC-42), com a etapa 6 (DEC-41); v1.8 aprovada em 08/11/2026 (DEC-44), com a revisão do método da trilha A (DEC-43, §13.1); v1.9 com o resultado da revisão: trilha A encerrada com resultado negativo. Decisões PD-15 a PD-23 e PD-43 a PD-45 em §1; critérios de G2 pré-registrados (§10.2). Mudanças depois disto entram como nova versão, com motivo no histórico. |
 | Data | 26/10/2026 |
 | Documentos de origem | [01 — PRD](01-prd.md) v0.8; [02 — SRS](02-srs.md) v0.5; [03 — Architecture](03-architecture.md) v0.8; [06 — Data & Integrations](06-data-integrations.md) v0.8 |
 
@@ -354,7 +354,7 @@ Motivo: um mês de operações simuladas (~30 retornos diários) é pouco para c
 
 Depois do desenvolvimento, para cada degrau e horizonte, o modelo final é treinado com todo o período de desenvolvimento, com os hiperparâmetros e τ escolhidos pelo mesmo processo, e avaliado uma vez no holdout (§3.3). Pelo mesmo processo, ele se abstém no holdout se a validação em m9 não mostrar vantagem (DEC-41); o holdout fica então sem operações e inconclusivo pelo IS-17.
 
-Na trilha A, o holdout avalia o método revisado (§13.1), e só se a revisão atender ao IS-18 no desenvolvimento.
+Na trilha A, o holdout avalia o método revisado (§13.1), e só se a revisão atender ao IS-18 no desenvolvimento. Não atendeu (08/11/2026): o holdout da trilha A fica lacrado.
 
 ---
 
@@ -491,7 +491,7 @@ Os critérios estão congelados desde 26/10/2026 (commit que registra esta vers�
 | 5 | Registro de experimentos (F-19) | 3 |
 | 6 | Trilha A: walk-forward de B4 a B6, ablações, estatísticas dos critérios de G2 (IS-14, IS-15), relatório de desenvolvimento | 4, 5 |
 | 6b | Trilha A: revisão do método em uma rodada (§13.1): dataset com H = 120 e 240 min, walk-forward e relatório de desenvolvimento | 6 |
-| 7 | Trilha A: avaliação única do holdout | 6b com o IS-18 atendido, e critérios congelados |
+| 7 | Trilha A: avaliação única do holdout. **Não será feita:** a revisão não atendeu ao IS-18, e a trilha A fechou com resultado negativo (§13.1) | 6b com o IS-18 atendido, e critérios congelados |
 | 8 | Trilha B: desenvolvimento com B0 a B7 | G1 e ≥ 8 semanas de livro (por volta de 20/12/2026) |
 | 9 | Trilha B: congelamento, coleta do holdout (6 semanas) e avaliação única | 8 |
 | 10 | Relatório de conclusão da V0.2: status de H-01 a H-04 (CA-12) | 7 (ou o encerramento da trilha A, §13.1), 9 |
@@ -529,6 +529,12 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 - **Trilha B:** o holdout de 6 semanas comporta só ~250 operações com H = 240 (~500 com H = 120); os horizontes dela se decidem na etapa 8 (§15).
 - **Viés do pesquisador:** o desenvolvimento já foi visto (§0), então o resultado do método revisado no desenvolvimento tende a ser otimista. Só o holdout dá a medida limpa.
 
+**Resultado (08/11/2026) [FATO]:** no walk-forward oficial com 120 e 240 min (doc 03, MD-34), nenhuma estratégia do XGBoost teve dobra positiva: a maioria se absteve em todas as dobras, e as poucas que operaram perderam. A logística, que é só referência, teve no máximo 2 de 6 dobras positivas. Pela regra 3, a **trilha A fica encerrada com resultado negativo**: com candles, volume e fluxo de negócios, nos horizontes de 15 a 240 min, o método não mostrou vantagem líquida de custos no desenvolvimento. O holdout não foi usado e continua lacrado.
+
+- H-01, H-02 e H-03 (parte 1) ficam sem evidência na trilha A. As ablações não puderam ser medidas, porque o XGBoost quase não operou.
+- [HIPÓTESE] Como no diagnóstico acima, falta informação de direção nessas features; horizontes mais longos não bastaram.
+- A trilha B (etapas 8 e 9), com o livro de ofertas, é a próxima chance de testar H-03 (parte 2) e H-04.
+
 ---
 
 ## 14. Riscos específicos da pesquisa
@@ -558,8 +564,8 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | Comparar os degraus de uma trilha nos mesmos pontos | **Resolvido em 07/11/2026 (DEC-36):** todos usam os pontos válidos no degrau mais alto da trilha e com alvo válido (§4.4) |
 | Regra do preço de execução no estudo de robustez de 2023 a 2025, que só tem candles (§3.2) | Quando o estudo for planejado, depois dos resultados da trilha A (DEC-36) |
 | Como o DSR (IS-15) estima a variância dos Sharpe entre as tentativas, já que hiperparâmetros e τ são escolhidos na validação interna (§8.2) | **Resolvido em 08/11/2026 (DEC-41):** pelo Sharpe de cada tentativa nos meses de validação interna (§10.1) |
-| Cenário do drawdown do IS-19 (base ou estresse) e regra do ganho incremental nas ablações (as duas diferenças ou basta uma), §10.2 (doc 03 §5.4) | Antes da etapa 7 |
-| Horizontes da trilha B, já que H = 240 min comporta só ~250 operações no holdout de 6 semanas (IS-17; §13.1) | Etapa 8 |
+| Cenário do drawdown do IS-19 (base ou estresse) e regra do ganho incremental nas ablações (as duas diferenças ou basta uma), §10.2 (doc 03 §5.4) | Antes da avaliação de um holdout: na trilha B, etapa 9, já que a etapa 7 não será feita |
+| Horizontes e método da trilha B, já que H = 240 min comporta só ~250 operações no holdout de 6 semanas (IS-17) e a trilha A terminou sem vantagem (§13.1) | Etapa 8 |
 
 ---
 
@@ -595,3 +601,4 @@ Pelo calendário, a trilha B só termina por volta de meados de fevereiro de 202
 | 1.6 | 07/11/2026 | Aprovado em 07/11/2026 (DEC-39), com os requisitos das etapas 4 e 5. DEC-38: §9, cenários de custo, com o de estresse juntando taxa, deslizamento e latência; §10.1, capital marcado minuto a minuto; §10.2, esclarecimentos do IS-15 (configurações distintas) e do IS-19 (cenário de estresse e drawdown), antes de qualquer avaliação do holdout; §11, colunas de simulação no dataset e contagem de tentativas. Também: §4.4, momento do próximo sinal; §6, detalhes dos baselines; §10.1, janela e definições das métricas; §11, detalhes do registro; §13 e §15, estatísticas de G2 e variância do DSR na etapa 6. |
 | 1.7 | 08/11/2026 | Aprovado em 08/11/2026 (DEC-42), com os requisitos da etapa 6. DEC-41: §7, grade de τ mantida; §8.2, hiperparâmetros pelo log loss, τ pelo Sharpe com pelo menos 20 operações e abstenção sem vantagem; §10.1, variância do DSR pelos meses de validação. Também: §7, features por degrau, linhas de treino, implementação dos modelos e 180 tentativas na trilha A; §8.1, meses e dobras da trilha A e purga; §8.3, abstenção no holdout; §10.1, bootstrap, DSR, ablações e relatório de desenvolvimento; §11, execução de modelo; §15, pendência do DSR resolvida. |
 | 1.8 | 08/11/2026 | Aprovado em 08/11/2026 (DEC-44), com os requisitos da etapa 6b. DEC-43 (PD-43 a PD-45): revisão do método da trilha A em uma rodada, com H = 120 e 240 min e o mesmo alvo (§1, §4.2, §4.3, §13.1). Também: §0, o que foi observado antes da revisão; §7, 360 tentativas na trilha A; §8.3 e §13, etapa 6b e condição da etapa 7; §15, as duas pendências de G2 e os horizontes da trilha B. |
+| 1.9 | 08/11/2026 | §13.1: resultado da revisão (doc 03, MD-34). Nenhuma estratégia do XGBoost teve dobra positiva com 120 e 240 min, e pela regra de PD-43 a trilha A fecha com resultado negativo, com o holdout lacrado. §8.3, §13 e §15 atualizados: a etapa 7 não será feita, as duas pendências de G2 passam para a trilha B, e o método da trilha B entra na pendência da etapa 8. Método sem mudança. |

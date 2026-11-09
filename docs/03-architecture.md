@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.30 — rascunho |
+| Versão | 0.31 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -467,6 +467,16 @@ A revisão troca só os horizontes da trilha A: 120 e 240 min no lugar de 15 e 6
   - o walk-forward sem `--horizons`, que usa os horizontes do manifesto e recusa um ausente antes do registro.
 
   pytest, ruff e mypy passam.
+- **MD-34 — execução oficial da revisão (08/11/2026, Brasília),** depois do commit `b857af2`, sem `.dirty`:
+  - **Dataset** `07e9e58b880bb520`: 393.120 minutos; 391.500 pontos elegíveis com H = 120 (alvo positivo em 29,5%) e 391.380 com H = 240 (34,5%). Levou 20,5 s, com pico de 2,5 GiB, e foi enviado a `derived/datasets/`.
+  - **Walk-forward:** 12 de 12 execuções ok, de `exp-20261109T015026.414571Z` a `exp-20261109T015615.346981Z`, em 7 min 28 s, com pico de 1,9 GiB. A contagem do IS-15 passou a 360 tentativas.
+  - **Relatório** `rep-20261109T015805.813555Z`, em 3,2 s, em `data/reports/` e em `derived/reports/`.
+  - **Resultados, só do desenvolvimento** (dobras de teste juntas, 23/01 a 22/07/2026; holdout não lido):
+    - **XGBoost:** 0 de 6 dobras positivas nas seis estratégias. B4 operou numa dobra em cada horizonte: com H = 120, em D3 (30 operações, −8,2%); com H = 240, em D1 (47 operações, −9,1%, drawdown de 18,3%). B5 operou com H = 120 em D3 (13 operações, −2,7%). O resto se absteve em todas as dobras.
+    - **Logística (referência, nunca candidata a G2):** B4 com H = 120 fez 23 operações e +6,8% (D3 +4,3%, D6 +2,5%): 2 de 6 dobras positivas, IC 95% da expectativa de −31 a +96 pb e DSR de 0,006. As outras ficaram perto de zero ou negativas.
+    - **AUC no teste:** de 0,54 a 0,60 com H = 120 e de 0,49 a 0,59 com H = 240, nos dois modelos. A feature mais importante continua sendo a volatilidade (`rvol_60`).
+    - **Baselines:** B1 −27,2%; B3 −96,0% (H = 120) e −87,9% (H = 240).
+  - **Regra de PD-43 (doc 04 §13.1):** nenhuma estratégia do XGBoost tem resultado positivo em 4 das 6 dobras. Pela regra decidida antes de treinar, a trilha A fecha com resultado negativo, sem outra rodada, e o holdout (23/07 a 22/10/2026) fica lacrado. Resultado negativo é resultado válido.
 
 ---
 
@@ -916,3 +926,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.28 | 08/11/2026 | §5.4: implementação da etapa 6 (pontos e purga, modelos, diagnósticos, tentativas, abstenção, previsões, relatório, saída dos comandos e testes), duas pendências para antes do holdout (cenário do drawdown do IS-19 e regra do ganho incremental nas ablações) e MD-33 (walk-forward sintético do tamanho da trilha A em 7 min 22 s, pico de 1,7 GiB; relatório em 5,2 s; execução oficial depois do commit `4e4233b` em 12 min 44 s, pico de 1,27 GiB, 180 tentativas; desenvolvimento quase todo em abstenção, sem estratégia que passe na prévia de G2). |
 | 0.29 | 08/11/2026 | MD-33: correção da conclusão. O IS-18, medido no desenvolvimento, deu 0 de 6 dobras positivas em todas as estratégias, então nenhuma passa em G2 com este método, seja qual for o holdout; a versão 0.28 dizia que o desenvolvimento não aprovava nem reprovava G2. |
 | 0.30 | 08/11/2026 | §5.5 aprovado em 08/11/2026 (DEC-44). §5.5: revisão do método da trilha A (etapa 6b, DEC-43): `--horizons` no `trader dataset`, horizontes do walk-forward vindos do manifesto, testes previstos, disco, tempo e sequência oficial; implementação, com a recusa de horizontes inválidos. |
+| 0.31 | 08/11/2026 | §5.5: MD-34, execução oficial da revisão da trilha A (dataset `07e9e58b880bb520` em 20,5 s; walk-forward em 7 min 28 s, pico de 1,9 GiB, 360 tentativas; relatório em 3,2 s). Nenhuma estratégia do XGBoost teve dobra positiva, e pela regra de PD-43 a trilha A fecha com resultado negativo, com o holdout lacrado. |
