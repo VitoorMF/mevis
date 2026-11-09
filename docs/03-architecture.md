@@ -4,7 +4,7 @@
 |---|---|
 | Projeto | **MEVIS** — Market Evidence Intelligence System |
 | Documento | 03 — System Architecture |
-| Versão | 0.28 — rascunho |
+| Versão | 0.29 — rascunho |
 | Escopo desta versão | **Data Engine (V0.1) e hospedagem na AWS.** V0.2 e V0.3 apenas esboçadas (§13). |
 | Status | DEC-22 a DEC-24 e DEC-26 tomadas (DEC-21 substituída); ADR-01 a ADR-12 **aprovadas** (DEC-24) |
 | Data | 23/10/2026 |
@@ -438,7 +438,8 @@ O tempo de ajuste depende do tamanho, não dos valores. Resultados:
     - B3: expectativa de −22,5 pb (H = 15) e −23,0 pb (H = 60), perto do custo de ida e volta; capital perto de zero.
     - B0: zero.
   - **Prévia de G2:** nenhuma estratégia passa. IS-17 tem no máximo 30 operações. Os IC 95% da expectativa ficam abaixo de zero ou cruzam o zero. Com o XGBoost sem operações, o DSR e as ablações ficam vazios.
-  - Pelo §8.3 do doc 04, o mesmo processo no holdout tende a se abster, o que deixaria G2 inconclusivo pelo IS-17. O desenvolvimento não aprova nem reprova G2. Resultado negativo é resultado válido.
+  - Pelo §8.3 do doc 04, o mesmo processo no holdout tende a se abster, o que daria zero operações e resultado inconclusivo pelo IS-17.
+  - O IS-18, porém, é medido no desenvolvimento (doc 04 §10.1) e deu 0 de 6 dobras positivas em todas as estratégias; um mês de abstenção não conta como positivo (doc 04 §8.2). Como G2 exige todos os critérios, nenhuma estratégia da trilha A passa em G2 com este método, seja qual for o resultado no holdout. Resultado negativo é resultado válido.
 
 ---
 
@@ -886,3 +887,4 @@ Conclusão: a escolha da instância para 2027 depende de dois fatos que a fatura
 | 0.26 | 07/11/2026 | §5.3: implementação das etapas 4 e 5 (colunas de simulação, B1 e B2 no comando, tentativas dos baselines, ordem das recusas, registros locais e reconstrução, testes) e MD-32 (dataset refeito em 25 s; baselines nos sete cenários em cerca de 1 s, B2 com 20.000 operações em 0,9 s, pico de ~560 MB); dataset oficial `1f96ddf76ce5e058`, refeito depois do commit, e as primeiras execuções de baselines registradas no S3. |
 | 0.27 | 08/11/2026 | §5.4 aprovado em 08/11/2026 (DEC-42). §5 e §5.4: treino, validação e relatório de desenvolvimento da etapa 6 (DEC-41): pacotes `models` e `stats`, walk-forward e relatório no pipeline, campo `outcome` e tabela `outcomes` no registro, previsões guardadas, `xgboost` e `scikit-learn` no grupo `pesquisa`, estimativa de tempo e testes previstos. |
 | 0.28 | 08/11/2026 | §5.4: implementação da etapa 6 (pontos e purga, modelos, diagnósticos, tentativas, abstenção, previsões, relatório, saída dos comandos e testes), duas pendências para antes do holdout (cenário do drawdown do IS-19 e regra do ganho incremental nas ablações) e MD-33 (walk-forward sintético do tamanho da trilha A em 7 min 22 s, pico de 1,7 GiB; relatório em 5,2 s; execução oficial depois do commit `4e4233b` em 12 min 44 s, pico de 1,27 GiB, 180 tentativas; desenvolvimento quase todo em abstenção, sem estratégia que passe na prévia de G2). |
+| 0.29 | 08/11/2026 | MD-33: correção da conclusão. O IS-18, medido no desenvolvimento, deu 0 de 6 dobras positivas em todas as estratégias, então nenhuma passa em G2 com este método, seja qual for o holdout; a versão 0.28 dizia que o desenvolvimento não aprovava nem reprovava G2. |
